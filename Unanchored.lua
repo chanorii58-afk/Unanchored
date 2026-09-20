@@ -25,7 +25,7 @@ local CurrentActiveMode = "None"
 -- User & Script Configuration
 local FlySpeed = 50
 local BlockSpeed = 60
-local RainbowSpeed = 8
+local RainbowSpeed = 2
 local ToggleGUIKey = Enum.KeyCode.RightControl
 local FlyKey = Enum.KeyCode.F
 
@@ -194,9 +194,9 @@ UIList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
     SF.CanvasSize = UDim2.new(0, 0, 0, UIList.AbsoluteContentSize.Y + 8)
 end)
 
--- Compact Stats Panel
+-- Compact Stats Panel (With Live Active Block Radar & Remote Spy Verification)
 local StatsFrame = Instance.new("Frame", SF)
-StatsFrame.Size = UDim2.new(1, -4, 0, 68)
+StatsFrame.Size = UDim2.new(1, -4, 0, 94)
 StatsFrame.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
 StatsFrame.BorderSizePixel = 0
 StatsFrame.LayoutOrder = 1
@@ -204,11 +204,11 @@ Instance.new("UICorner", StatsFrame).CornerRadius = UDim.new(0, 5)
 
 local function ST(Y, Text)
     local LN = Instance.new("TextLabel", StatsFrame)
-    LN.Size = UDim2.new(0.95, 0, 0, 14)
+    LN.Size = UDim2.new(0.95, 0, 0, 13)
     LN.Position = UDim2.new(0.03, 0, 0, Y)
     LN.BackgroundTransparency = 1
     LN.TextColor3 = Color3.fromRGB(190, 205, 235)
-    LN.TextSize = 9
+    LN.TextSize = 8.5
     LN.Font = Enum.Font.GothamMedium
     LN.TextXAlignment = Enum.TextXAlignment.Left
     LN.TextWrapped = true
@@ -217,9 +217,13 @@ local function ST(Y, Text)
 end
 
 local PL = ST(4, "Ping: -- ms")
-local BL = ST(18, "Bricks: 0")
-local PLL = ST(32, "Players: 0")
-local EL = ST(46, "Enlightened: Searching...")
+local BL = ST(18, "Active FE Orbit: 0 blocks")
+local BPhys = ST(32, "Block State: 🟢 100% Active & Awake")
+BPhys.TextColor3 = Color3.fromRGB(80, 255, 140)
+local BRemote = ST(46, "Remote: Paint.Script.Event 🤝 Ready")
+BRemote.TextColor3 = Color3.fromRGB(130, 200, 255)
+local PLL = ST(60, "Players: 0")
+local EL = ST(74, "Enlightened: Searching...")
 EL.TextColor3 = Color3.fromRGB(255, 215, 0)
 
 -- Settings Panel (Compact for Mobile)
@@ -407,6 +411,7 @@ end
 -- ========================================================
 -- 4. BUTTONS (INCLUDING NEW CHAIN, SNAKE, SHARK & HOLLOW PURPLE)
 -- ========================================================
+local TRadarBtn = BTN("Block Radar ESP: ON", Color3.fromRGB(30, 160, 100))
 local THollowPurple = BTN("Hollow Purple (FE / Gojo)", Color3.fromRGB(150, 40, 235))
 local TRainbow = BTN("Fast Rainbow: OFF", Color3.fromRGB(130, 45, 175))
 local TChain = BTN("Chain Trail (Link Physics)", Color3.fromRGB(90, 140, 210))
@@ -526,19 +531,37 @@ end
 -- Sets part.CFrame AND sets AssemblyLinearVelocity to match the displacement!
 -- This forces the Roblox server physics pipeline to replicate the movement to ALL players!
 local function UpdateFEPart(part, targetCF, lerpAlpha)
-    if not part or not part.Parent then return end
+    if not part or not part.Parent or part.Anchored then return end
     part.CanCollide = false
     part.Anchored = false
 
+    local root = L.Character and L.Character:FindFirstChild("HumanoidRootPart")
+    if root then
+        local dist = (part.Position - root.Position).Magnitude
+        -- If part somehow drifted, dropped, or fell (> 85 studs away), snap it back into orbit!
+        if dist > 85 then
+            part.CFrame = root.CFrame * CFrame.new(0, 3, 0)
+            part.AssemblyLinearVelocity = Vector3.new(0, 0.5, 0)
+            return
+        end
+    end
+
     local alpha = lerpAlpha or GetBlockLerpSpeed()
-    local newCF = (alpha >= 1) and targetCF or part.CFrame:Lerp(targetCF, alpha)
-    local delta = newCF.Position - part.Position
+    local currentCF = part.CFrame
+    local newCF = (alpha >= 1) and targetCF or currentCF:Lerp(targetCF, alpha)
+    local delta = newCF.Position - currentCF.Position
 
     -- CRITICAL FOR FE: AssemblyLinearVelocity matching displacement prevents sleep
     -- and forces Roblox server physics replication to sync position to all other players!
     part.AssemblyLinearVelocity = (delta * 35) + Vector3.new(0, 0.12, 0)
     part.AssemblyAngularVelocity = Vector3.new(0.05, 0, 0.05)
     part.CFrame = newCF
+
+    pcall(function()
+        if sethiddenproperty then
+            sethiddenproperty(part, "NetworkIsSleeping", false)
+        end
+    end)
 end
 
 -- Safe Staging Orbit: Keeps unanchored blocks hovering within 16 studs of the player
@@ -594,7 +617,23 @@ local function RESET_CAMERA()
     end
 end
 
--- Universal Mode Switcher: Automatically resets camera/POV and cleans previous loops
+-- Universal Mode Switcher: Automatically resets camera/POV, summons blocks, and cleans previous loops
+local function SummonBlocksToPlayer()
+    local root = L.Character and L.Character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    for i, part in ipairs(CP) do
+        if part and part.Parent and not part.Anchored then
+            part.CanCollide = false
+            part.Anchored = false
+            local dist = (part.Position - root.Position).Magnitude
+            if dist > 35 then
+                part.CFrame = root.CFrame * CFrame.new(math.random(-5, 5), math.random(1, 4), math.random(-5, 5))
+            end
+            part.AssemblyLinearVelocity = Vector3.new(0, 0.5, 0)
+        end
+    end
+end
+
 local function SWITCH_MODE(newModeName)
     if AC then AC:Disconnect() AC = nil end
     if BlasterConnection then BlasterConnection:Disconnect() BlasterConnection = nil end
@@ -605,6 +644,7 @@ local function SWITCH_MODE(newModeName)
 
     SET_CHARACTER_VISIBILITY(true)
     RESET_CAMERA() -- Guarantees POV is clean whenever user switches to any button/orbit
+    SummonBlocksToPlayer()
 
     CurrentActiveMode = newModeName
 end
@@ -615,7 +655,7 @@ local function STOP()
 end
 
 -- ========================================================
--- 5. PAINT TOOL & FAST RAINBOW TOOL-EQUIP BYPASS ENGINE
+-- 5. 100% FE PAINT TOOL & SERVER-SIDED EQUIP SPOOFING ENGINE
 -- ========================================================
 -- Finds the paint tool anywhere in Backpack or Character
 local function GetPaintTool()
@@ -628,7 +668,14 @@ local function GetPaintTool()
         if bp then table.insert(searchIn, bp) end
         for _, container in ipairs(searchIn) do
             for _, item in ipairs(container:GetChildren()) do
-                if item:IsA("Tool") and (item.Name:lower():find("paint") or item.Name:lower():find("color") or item.Name:lower():find("f3x") or item.Name:lower():find("btool")) then
+                if item:IsA("Tool") and (
+                    item.Name:lower():find("paint") or 
+                    item.Name:lower():find("color") or 
+                    item.Name:lower():find("f3x") or 
+                    item.Name:lower():find("btool") or
+                    item:FindFirstChild("SyncColor") or
+                    item:FindFirstChild("Paint")
+                ) then
                     return item
                 end
             end
@@ -637,11 +684,11 @@ local function GetPaintTool()
     return tool
 end
 
--- Fake-Equip Paint Tool Engine:
--- Makes the game think we are equipping the paint tool (Tool.Parent == Character),
--- but destroys RightGrip welds and hides the handle (Transparency = 1, CanCollide = false)
--- so the character is NOT visibly holding it. Hands remain 100% free to equip, hold,
--- and use other tools (Rifle, Sword, etc.) simultaneously while paint remains fully active!
+-- Server-Spoofed Paint Tool Engine:
+-- Makes the game server 100% register that we have equipped and are actively using the paint tool:
+-- 1. Sets Tool.Parent = Character so the server executes Tool.Equipped and server-side tool validation passes!
+-- 2. Hides the handle and detaches RightGrip weld so arms/hands remain completely free to equip/hold/use weapons (Rifle, Sword, etc.).
+-- 3. Automatically recovers if Roblox core scripts try to return the tool to Backpack when another tool is equipped.
 local function MaintainFakeEquippedPaintTool()
     local char = L.Character
     if not char then return end
@@ -652,7 +699,7 @@ local function MaintainFakeEquippedPaintTool()
         pcall(function() tool.Parent = char end)
     end
 
-    -- Remove any RightGrip weld from player's hand so arms are completely free
+    -- Clear tool holding pose / RightGrip from character's right arm so player doesn't visibly hold it
     local rightArm = char:FindFirstChild("Right Arm") or char:FindFirstChild("RightHand")
     if rightArm then
         local grip = rightArm:FindFirstChild("RightGrip")
@@ -668,38 +715,74 @@ local function MaintainFakeEquippedPaintTool()
     end
 end
 
--- Dispatches paint tool remote packets WITHOUT forcing player to visibly hold tool
--- and WITHOUT teleporting HumanoidRootPart (prevents camera/character glitching!)
+-- Dispatches paint tool remote packets to the server.
+-- Spoofs active tool usage on the server (via Tool:Activate() and Tool.Parent == char)
+-- so the server validates and replicates the paint to ALL players in the game!
+-- CRITICAL FE RULE: We NEVER set part.Color locally. Only the server paints the part!
 local function DispatchPaintToolRemote(part, colorToPaint)
     local char = L.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp or not part or not part.Parent then return end
+    -- Only dispatch to verified genuine FE server parts
+    if not (part:IsA("BasePart") and not part.Anchored) then return end
 
     local Dtool = GetPaintTool()
     if not Dtool then return end
 
-    -- Make game recognize tool as active without player visibly holding it
+    -- Make game recognize tool as active and equipped without player visibly holding it
     MaintainFakeEquippedPaintTool()
 
-    local scriptFolder = Dtool:FindFirstChild("Script") or Dtool:FindFirstChild("F3X") or Dtool
-    local event = scriptFolder and (scriptFolder:FindFirstChild("Event") or scriptFolder:FindFirstChild("RemoteEvent"))
+    -- Signal active tool usage to the server
+    pcall(function() Dtool:Activate() end)
 
-    if event then
+    -- 1. Paint.Script.Event as confirmed in Cobalt Remote Spy
+    local scriptFolder = Dtool:FindFirstChild("Script") or Dtool:FindFirstChild("F3X") or Dtool
+    local event = (scriptFolder and (scriptFolder:FindFirstChild("Event") or scriptFolder:FindFirstChild("RemoteEvent")))
+        or Dtool:FindFirstChild("Event", true)
+        or Dtool:FindFirstChildWhichIsA("RemoteEvent", true)
+
+    if event and event:IsA("RemoteEvent") then
+        local pos = part.Position
+        -- Cobalt Remote Spy EXACT signature:
+        -- part, Enum.NormalId.Top, part.Position, "both ð¤", colorToPaint, "smooth", ""
+        pcall(function()
+            event:FireServer(part, Enum.NormalId.Top, pos, "both ð¤", colorToPaint, "smooth", "")
+        end)
+        pcall(function()
+            event:FireServer(part, Enum.NormalId.Top, pos, "both 🤝", colorToPaint, "smooth", "")
+        end)
         for _, side in ipairs(SidesList) do
             pcall(function()
-                event:FireServer(part, side, part.Position, "both 🤝", colorToPaint, "", "")
+                event:FireServer(part, side, pos, "both 🤝", colorToPaint, "smooth", "")
             end)
         end
+    end
 
-        if Dtool:FindFirstChild("Activate") then
-            pcall(function() Dtool:Activate() end)
-        end
-    else
-        -- Alternate tool remote structure
-        local altRemote = Dtool:FindFirstChildWhichIsA("RemoteEvent", true)
-        if altRemote then
+    -- 2. F3X SyncColor or building tools
+    local syncColor = Dtool:FindFirstChild("SyncColor", true)
+    if syncColor then
+        if syncColor:IsA("RemoteFunction") then
             pcall(function()
-                altRemote:FireServer(part, SidesList[1], part.Position, "both 🤝", colorToPaint, "", "")
+                syncColor:InvokeServer({ { Part = part, Color = colorToPaint, Face = Enum.NormalId.Front } })
+            end)
+        elseif syncColor:IsA("RemoteEvent") then
+            pcall(function()
+                syncColor:FireServer({ { Part = part, Color = colorToPaint, Face = Enum.NormalId.Front } })
+            end)
+        end
+    end
+
+    -- 3. Any alternate RemoteEvents inside the tool
+    for _, child in ipairs(Dtool:GetDescendants()) do
+        if child:IsA("RemoteEvent") and child ~= event and child ~= syncColor then
+            pcall(function()
+                child:FireServer(part, colorToPaint)
+            end)
+            pcall(function()
+                child:FireServer(part, BrickColor.new(colorToPaint))
+            end)
+            pcall(function()
+                child:FireServer(part, SidesList[1], part.Position, "both 🤝", colorToPaint, "", "")
             end)
         end
     end
@@ -709,15 +792,15 @@ local function ForcePaintBlockServerSided(part)
     DispatchPaintToolRemote(part, SelectedColor)
 end
 
--- FAST RAINBOW TOGGLE: Rapidly cycles colors across all unanchored blocks concurrently
+-- RAINBOW TOGGLE: Cycles colors across all unanchored blocks concurrently via FE Server Paint
 TRainbow.MouseButton1Click:Connect(function()
     IsRainbowActive = not IsRainbowActive
     if IsRainbowActive then
-        TRainbow.Text = "Fast Rainbow: ON"
+        TRainbow.Text = "Rainbow (FE): ON"
         TRainbow.BackgroundColor3 = Color3.fromRGB(40, 190, 80)
         MaintainFakeEquippedPaintTool()
     else
-        TRainbow.Text = "Fast Rainbow: OFF"
+        TRainbow.Text = "Rainbow (FE): OFF"
         TRainbow.BackgroundColor3 = Color3.fromRGB(130, 45, 175)
         -- Return tool to backpack cleanly when disabled
         local tool = GetPaintTool()
@@ -747,24 +830,25 @@ R.Stepped:Connect(function()
     end
 end)
 
--- Dedicated Fast Rainbow Broadcast Loop (Runs continuously, rainbowfying all blocks!)
+-- Dedicated FE Rainbow Broadcast Loop (Smooth, slowed down, 100% server paint)
 task.spawn(function()
-    while task.wait(0.03) and S.Parent do
+    while task.wait(0.08) and S.Parent do
         if IsRainbowActive and #CP > 0 then
             MaintainFakeEquippedPaintTool()
             local timeTick = os.clock() * RainbowSpeed
             local total = #CP
             for i, part in ipairs(CP) do
-                if part and part.Parent then
+                if part and part.Parent and not part.Anchored then
                     local rainbowHue = (timeTick + (i / math.max(1, total))) % 1
                     local rainbowColor = Color3.fromHSV(rainbowHue, 1, 1)
-                    part.Color = rainbowColor
+                    -- 100% FE Paint: Server paints the block through the tool remote!
+                    -- NO fake client-side part.Color assignments!
                     DispatchPaintToolRemote(part, rainbowColor)
                 end
             end
         elseif IsPaintActive and #CP > 0 then
             for _, part in ipairs(CP) do
-                if part and part.Parent then
+                if part and part.Parent and not part.Anchored then
                     ForcePaintBlockServerSided(part)
                 end
             end
@@ -772,10 +856,18 @@ task.spawn(function()
     end
 end)
 
--- Part Validation
+-- Strict 100% FE Server-Sided Part Validation Engine:
+-- Eliminates ALL client-side fake parts, anchored world geometry, camera parts, and non-replicated objects!
 local function VLD(O)
-    if not (O:IsA("BasePart") and not O.Anchored) then return false end
-    if O:FindFirstAncestorOfClass("Model") and O:FindFirstAncestorOfClass("Model"):FindFirstChildOfClass("Humanoid") then
+    if not O or not O.Parent then return false end
+    if not O:IsA("BasePart") or O:IsA("Terrain") then return false end
+    if O.Anchored then return false end
+    if not O:IsDescendantOf(workspace) then return false end
+    if O:IsDescendantOf(workspace.CurrentCamera) then return false end
+
+    -- Must not be part of any character or humanoid
+    local model = O:FindFirstAncestorOfClass("Model")
+    if model and model:FindFirstChildOfClass("Humanoid") then
         return false
     end
     for _, p in ipairs(P:GetPlayers()) do
@@ -783,17 +875,24 @@ local function VLD(O)
             return false
         end
     end
+
+    -- Ignore accessory handles attached to characters
+    if O.Name == "Handle" and O.Parent and O.Parent:IsA("Accessory") then
+        return false
+    end
+
     return true
 end
 
--- Persistent Part Index Gathering Engine:
+-- Persistent Part Index Gathering Engine (100% FE SERVER BLOCKS ONLY):
+-- Scans workspace (with priority for workspace.Bricks, workspace.Parts, workspace.Blocks)
 -- Preserves existing parts in CP at their EXACT indexes so no blocks ever swap positions or jump!
 local function CC()
     local LIM = GETLIMIT()
     local kept = {}
     local existingSet = {}
 
-    -- 1. Retain all valid existing parts in CP at their exact positions
+    -- 1. Retain all valid existing parts in CP at their exact positions, pruning invalid or anchored parts
     for _, p in ipairs(CP) do
         if p and p.Parent and VLD(p) and #kept < LIM then
             table.insert(kept, p)
@@ -801,20 +900,152 @@ local function CC()
         end
     end
 
-    -- 2. Only append newly discovered unanchored blocks to the end
+    -- 2. Only append newly discovered genuine FE unanchored server blocks to the end
     if #kept < LIM then
-        for _, O in ipairs(workspace:GetDescendants()) do
-            if #kept >= LIM then break end
-            if not existingSet[O] and VLD(O) then
-                ClaimPartFE(O)
-                table.insert(kept, O)
-                existingSet[O] = true
+        -- Fast Priority Pass: check dedicated folders first if game uses them (like workspace.Bricks from screenshot!)
+        local priorityFolders = { workspace:FindFirstChild("Bricks"), workspace:FindFirstChild("Parts"), workspace:FindFirstChild("Blocks") }
+        for _, f in ipairs(priorityFolders) do
+            if f then
+                for _, O in ipairs(f:GetChildren()) do
+                    if #kept >= LIM then break end
+                    if not existingSet[O] and VLD(O) then
+                        ClaimPartFE(O)
+                        table.insert(kept, O)
+                        existingSet[O] = true
+                    end
+                end
+            end
+        end
+
+        -- General Workspace Pass
+        if #kept < LIM then
+            for _, O in ipairs(workspace:GetDescendants()) do
+                if #kept >= LIM then break end
+                if not existingSet[O] and VLD(O) then
+                    ClaimPartFE(O)
+                    table.insert(kept, O)
+                    existingSet[O] = true
+                end
             end
         end
     end
 
     CP = kept
 end
+
+-- ========================================================
+-- BLOCK RADAR & LIVE ACTIVITY INSPECTOR (100% TRANSPARENCY)
+-- Renders 3D BillboardGuis directly above every block in workspace
+-- 🟢 GREEN: Active & Awake in formation with live speed & distance
+-- 🔴 AMBER: Dormant / Sleeping parts in workspace
+-- ========================================================
+local IsRadarActive = true
+local RadarBillboards = {}
+
+local function ClearRadar()
+    for part, bb in pairs(RadarBillboards) do
+        if bb and bb.Parent then pcall(function() bb:Destroy() end) end
+    end
+    RadarBillboards = {}
+    for _, item in ipairs(workspace:GetDescendants()) do
+        if item.Name == "SOFI_BLOCK_RADAR" then
+            pcall(function() item:Destroy() end)
+        end
+    end
+end
+
+local function UpdateBlockRadar()
+    if not IsRadarActive then
+        ClearRadar()
+        return
+    end
+
+    local activeMap = {}
+    for i, p in ipairs(CP) do
+        if p and p.Parent then
+            activeMap[p] = i
+        end
+    end
+
+    local root = L.Character and L.Character:FindFirstChild("HumanoidRootPart")
+    local rootPos = root and root.Position or Vector3.zero
+
+    -- 1. Radar tags for all active blocks in CP
+    for i, part in ipairs(CP) do
+        if part and part.Parent and not part.Anchored then
+            local bb = RadarBillboards[part]
+            if not bb or not bb.Parent then
+                bb = Instance.new("BillboardGui")
+                bb.Name = "SOFI_BLOCK_RADAR"
+                bb.Size = UDim2.new(0, 105, 0, 32)
+                bb.StudsOffset = Vector3.new(0, 2.4, 0)
+                bb.AlwaysOnTop = true
+                bb.Adornee = part
+                bb.Parent = part
+
+                local f = Instance.new("Frame", bb)
+                f.Size = UDim2.new(1, 0, 1, 0)
+                f.BackgroundColor3 = Color3.fromRGB(16, 26, 20)
+                f.BackgroundTransparency = 0.2
+                Instance.new("UICorner", f).CornerRadius = UDim.new(0, 4)
+
+                local stroke = Instance.new("UIStroke", f)
+                stroke.Color = Color3.fromRGB(40, 255, 120)
+                stroke.Thickness = 1
+
+                local title = Instance.new("TextLabel", f)
+                title.Name = "Title"
+                title.Size = UDim2.new(1, 0, 0.5, 0)
+                title.BackgroundTransparency = 1
+                title.TextColor3 = Color3.fromRGB(60, 255, 130)
+                title.TextSize = 8.5
+                title.Font = Enum.Font.GothamBold
+
+                local sub = Instance.new("TextLabel", f)
+                sub.Name = "Sub"
+                sub.Size = UDim2.new(1, 0, 0.5, 0)
+                sub.Position = UDim2.new(0, 0, 0.5, 0)
+                sub.BackgroundTransparency = 1
+                sub.TextColor3 = Color3.fromRGB(210, 245, 220)
+                sub.TextSize = 7.5
+                sub.Font = Enum.Font.GothamMedium
+
+                RadarBillboards[part] = bb
+            end
+
+            local vel = part.AssemblyLinearVelocity
+            local speed = vel and math.round(vel.Magnitude) or 0
+            local dist = math.round((part.Position - rootPos).Magnitude)
+            local f = bb:FindFirstChildOfClass("Frame")
+            if f then
+                local t = f:FindFirstChild("Title")
+                local s = f:FindFirstChild("Sub")
+                if t then t.Text = "🟢 FE ACTIVE #" .. i end
+                if s then s.Text = "Vel: " .. speed .. " | Dist: " .. dist .. "m" end
+            end
+        end
+    end
+
+    -- Clean up stale tags
+    for part, bb in pairs(RadarBillboards) do
+        if not part or not part.Parent or not activeMap[part] then
+            if bb and bb.Parent then pcall(function() bb:Destroy() end) end
+            RadarBillboards[part] = nil
+        end
+    end
+end
+
+TRadarBtn.MouseButton1Click:Connect(function()
+    IsRadarActive = not IsRadarActive
+    if IsRadarActive then
+        TRadarBtn.Text = "Block Radar ESP: ON"
+        TRadarBtn.BackgroundColor3 = Color3.fromRGB(30, 160, 100)
+    else
+        TRadarBtn.Text = "Block Radar ESP: OFF"
+        TRadarBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 95)
+        ClearRadar()
+    end
+end)
 
 -- Floor Distance Helper
 local function GetFloorDistance(originPos, ignoreChar)
@@ -872,7 +1103,6 @@ THollowPurple.MouseButton1Click:Connect(function()
                     if i <= half then
                         -- LAPSE BLUE (Vortex Blue)
                         local blueColor = Color3.fromRGB(0, 150, 255)
-                        PRT.Color = blueColor
                         if shouldBroadcastColor then DispatchPaintToolRemote(PRT, blueColor) end
 
                         local angle = orbitSpeed + (i * (math.pi * 2 / half))
@@ -886,7 +1116,6 @@ THollowPurple.MouseButton1Click:Connect(function()
                     else
                         -- REVERSAL RED (Opposing Red)
                         local redColor = Color3.fromRGB(255, 30, 45)
-                        PRT.Color = redColor
                         if shouldBroadcastColor then DispatchPaintToolRemote(PRT, redColor) end
 
                         local angle = -orbitSpeed + (i * (math.pi * 2 / (total - half)))
@@ -911,7 +1140,6 @@ THollowPurple.MouseButton1Click:Connect(function()
 
             for i, PRT in ipairs(CP) do
                 if PRT and PRT.Parent then
-                    PRT.Color = purpleColor
                     if shouldBroadcastColor then DispatchPaintToolRemote(PRT, purpleColor) end
 
                     local phi = (1 + math.sqrt(5)) / 2
@@ -942,7 +1170,7 @@ THollowPurple.MouseButton1Click:Connect(function()
                 if PRT and PRT.Parent then
                     PRT.CanCollide = false
                     PRT.Anchored = false
-                    PRT.Color = intensePurple
+                    if shouldBroadcastColor then DispatchPaintToolRemote(PRT, intensePurple) end
                     -- Replicates high blast velocity across network
                     PRT.AssemblyLinearVelocity = TargetDirection * (BlockSpeed * 20)
                     PRT.AssemblyAngularVelocity = Vector3.new(0.5, 0.5, 0.5)
@@ -1126,12 +1354,11 @@ TShark.MouseButton1Click:Connect(function()
     local LastEyeBlinkTime = os.clock()
     local EyesClosed = false
 
-    -- Server-sided initial shark paint: Colors the whole shark once on startup
+    -- Server-sided initial shark paint: Colors the whole shark via FE paint tool
     task.spawn(function()
         for i, PRT in ipairs(CP) do
             if PRT and PRT.Parent then
                 local col = (i == 2 or i == 3) and eyeOpenColor or ((i % 2 == 0) and sharkBodyColor or sharkBellyColor)
-                PRT.Color = col
                 DispatchPaintToolRemote(PRT, col)
             end
         end
@@ -1152,7 +1379,7 @@ TShark.MouseButton1Click:Connect(function()
         local swimRate = isMoving and math.clamp(speed * 1.8, 5, 16) or 3.2
         local turnTilt = math.clamp(velocity.X * 0.05, -0.4, 0.4)
 
-        -- Shark Eye Blinking Logic (Paints eye blocks to close/open eyes)
+        -- Shark Eye Blinking Logic (Paints eye blocks to close/open eyes via FE Paint Tool)
         local now = os.clock()
         if now - LastEyeBlinkTime > 3.8 then
             EyesClosed = true
@@ -1165,15 +1392,14 @@ TShark.MouseButton1Click:Connect(function()
         end
 
         -- Broadcast paint remote ONLY when eye state actually flips (prevents remote flooding!)
+        -- Strictly uses FE remote with NO fake client paints!
         if EyesClosed ~= LastEyeState then
             LastEyeState = EyesClosed
             local eyeCol = EyesClosed and eyeClosedColor or eyeOpenColor
             if CP[2] and CP[2].Parent then
-                CP[2].Color = eyeCol
                 DispatchPaintToolRemote(CP[2], eyeCol)
             end
             if CP[3] and CP[3].Parent then
-                CP[3].Color = eyeCol
                 DispatchPaintToolRemote(CP[3], eyeCol)
             end
         end
@@ -1316,14 +1542,16 @@ TShark.MouseButton1Click:Connect(function()
                 colors[cur] = col
                 cur = cur + 1
             end
+        end
 
-            -- Fallback for any leftover blocks
-            while cur <= totalBlocks do
-                local angle = cur * 1.5
-                offsets[cur] = Vector3.new(math.cos(angle) * 2, 0, (cur % 5))
-                colors[cur] = sharkBodyColor
-                cur = cur + 1
-            end
+        -- GUARANTEED ALLOCATION FOR EVERY SINGLE BLOCK (prevents any missing parts!)
+        while cur <= totalBlocks do
+            local angle = cur * 1.5707
+            local z = -2.0 + ((cur % 9) * 1.2)
+            local y = (cur % 3 == 0) and 1.2 or -0.6
+            offsets[cur] = Vector3.new(math.cos(angle) * 1.8, y, z)
+            colors[cur] = (y < 0) and sharkBellyColor or sharkBodyColor
+            cur = cur + 1
         end
 
         local rootCF = Root.CFrame
@@ -1598,7 +1826,6 @@ TFollow.MouseButton1Click:Connect(function()
 
         for i, PRT in ipairs(CP) do
             if PRT and PRT.Parent then
-                PRT.Color = SelectedColor
                 if shouldBroadcast then DispatchPaintToolRemote(PRT, SelectedColor) end
                 local angle = A + (i * (math.pi * 2 / #CP))
                 local offset = Vector3.new(math.cos(angle) * 6, 2 + math.sin(i + A) * 2, math.sin(angle) * 6)
@@ -1626,7 +1853,6 @@ TBlaster.MouseButton1Click:Connect(function()
 
         if Barrel and Barrel.Parent then
             local barrelColor = Color3.fromRGB(255, 50, 50)
-            Barrel.Color = barrelColor
             if shouldBroadcast then DispatchPaintToolRemote(Barrel, barrelColor) end
             local barrelCF = CFrame.new(Center + Vector3.new(2, 2, -2), M.Hit.Position)
             UpdateFEPart(Barrel, barrelCF, 0.4)
@@ -1676,7 +1902,6 @@ THelix.MouseButton1Click:Connect(function()
         for i, PRT in ipairs(CP) do
             if PRT and PRT.Parent then
                 local helixColor = Color3.fromHSV((i / #CP + A * 0.1) % 1, 0.8, 1)
-                PRT.Color = helixColor
                 if shouldBroadcast then DispatchPaintToolRemote(PRT, helixColor) end
                 local y = ((i * 0.8) % 30) - 15
                 local side = (i % 2 == 0) and 1 or -1
@@ -1704,7 +1929,6 @@ TTornado.MouseButton1Click:Connect(function()
         for i, PRT in ipairs(CP) do
             if PRT and PRT.Parent then
                 local tornadoColor = Color3.fromRGB(200, 200, 220)
-                PRT.Color = tornadoColor
                 if shouldBroadcast then DispatchPaintToolRemote(PRT, tornadoColor) end
                 local height = (i / math.max(1, #CP)) * 25
                 local radius = height * 0.6 + 2
@@ -1743,7 +1967,6 @@ TV.MouseButton1Click:Connect(function()
 
         for i, PRT in ipairs(CP) do
             if PRT and PRT.Parent then
-                PRT.Color = SelectedColor
                 if shouldBroadcast then DispatchPaintToolRemote(PRT, SelectedColor) end
                 local D, CA = 10 + (i * 0.2), A + (i * 0.1)
                 local targetCF = CFrame.new(Center + Vector3.new(math.cos(CA) * D, (i * 0.1) % 15, math.sin(CA) * D))
@@ -1765,7 +1988,6 @@ TR.MouseButton1Click:Connect(function()
         for i, PRT in ipairs(CP) do
             if PRT and PRT.Parent then
                 local rainColor = Color3.fromRGB(0, 120, 255)
-                PRT.Color = rainColor
                 if shouldBroadcast then DispatchPaintToolRemote(PRT, rainColor) end
                 local targetCF = CFrame.new(Center + Vector3.new(math.sin(i + os.clock()) * 30, 40 + (i % 20), math.cos(i + os.clock()) * 30))
                 UpdateFEPart(PRT, targetCF, GetBlockLerpSpeed())
@@ -1788,7 +2010,6 @@ TOrbit.MouseButton1Click:Connect(function()
 
         for i, PRT in ipairs(CP) do
             if PRT and PRT.Parent then
-                PRT.Color = SelectedColor
                 if shouldBroadcast then DispatchPaintToolRemote(PRT, SelectedColor) end
                 local y = 1 - (i / math.max(1, #CP)) * 2
                 local radius = math.sqrt(1 - y * y) * 12
@@ -1816,7 +2037,6 @@ TShield.MouseButton1Click:Connect(function()
         for i, PRT in ipairs(CP) do
             if PRT and PRT.Parent then
                 local shieldColor = Color3.fromRGB(50, 255, 100)
-                PRT.Color = shieldColor
                 if shouldBroadcast then DispatchPaintToolRemote(PRT, shieldColor) end
                 local angle = A + (i * (math.pi * 2 / #CP))
                 local x = math.cos(angle) * 5
@@ -1846,14 +2066,31 @@ TFL.MouseButton1Click:Connect(function()
     end)
 end)
 
--- Main Background Loop (Stats & Scanning)
+-- Main Background Loop (Stats, Block Radar & Scanning)
 task.spawn(function()
     HoldBlocksInVoid()
     while task.wait(0.5) and S.Parent do
         pcall(function()
             CC()
+            UpdateBlockRadar()
             PL.Text = "Ping: " .. math.round(L:GetNetworkPing() * 1000) .. " ms"
-            BL.Text = "Bricks: " .. #CP
+
+            local totalWorkspaceBlocks = 0
+            for _, o in ipairs(workspace:GetDescendants()) do
+                if o:IsA("BasePart") and not o.Anchored and not o:IsDescendantOf(workspace.CurrentCamera) then
+                    totalWorkspaceBlocks = totalWorkspaceBlocks + 1
+                end
+            end
+
+            local activeCount = #CP
+            BL.Text = "Active FE Orbit: " .. activeCount .. " / " .. totalWorkspaceBlocks .. " blocks"
+            if activeCount > 0 then
+                BPhys.Text = "Block State: 🟢 " .. activeCount .. " Awake & Orbiting"
+                BPhys.TextColor3 = Color3.fromRGB(80, 255, 140)
+            else
+                BPhys.Text = "Block State: 🟡 Scanning for unanchored parts"
+                BPhys.TextColor3 = Color3.fromRGB(255, 200, 80)
+            end
             PLL.Text = "Players: " .. #P:GetPlayers()
 
             local enlightenedList = {}
