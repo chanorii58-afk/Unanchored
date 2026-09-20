@@ -617,17 +617,69 @@ end
 -- ========================================================
 -- 5. PAINT TOOL & FAST RAINBOW TOOL-EQUIP BYPASS ENGINE
 -- ========================================================
+-- Finds the paint tool anywhere in Backpack or Character
+local function GetPaintTool()
+    local char = L.Character
+    local bp = L:FindFirstChildOfClass("Backpack")
+    local tool = (char and char:FindFirstChild("Paint")) or (bp and bp:FindFirstChild("Paint"))
+    if not tool then
+        local searchIn = {}
+        if char then table.insert(searchIn, char) end
+        if bp then table.insert(searchIn, bp) end
+        for _, container in ipairs(searchIn) do
+            for _, item in ipairs(container:GetChildren()) do
+                if item:IsA("Tool") and (item.Name:lower():find("paint") or item.Name:lower():find("color") or item.Name:lower():find("f3x") or item.Name:lower():find("btool")) then
+                    return item
+                end
+            end
+        end
+    end
+    return tool
+end
+
+-- Fake-Equip Paint Tool Engine:
+-- Makes the game think we are equipping the paint tool (Tool.Parent == Character),
+-- but destroys RightGrip welds and hides the handle (Transparency = 1, CanCollide = false)
+-- so the character is NOT visibly holding it. Hands remain 100% free to equip, hold,
+-- and use other tools (Rifle, Sword, etc.) simultaneously while paint remains fully active!
+local function MaintainFakeEquippedPaintTool()
+    local char = L.Character
+    if not char then return end
+    local tool = GetPaintTool()
+    if not tool then return end
+
+    if tool.Parent ~= char then
+        pcall(function() tool.Parent = char end)
+    end
+
+    -- Remove any RightGrip weld from player's hand so arms are completely free
+    local rightArm = char:FindFirstChild("Right Arm") or char:FindFirstChild("RightHand")
+    if rightArm then
+        local grip = rightArm:FindFirstChild("RightGrip")
+        if grip then pcall(function() grip:Destroy() end) end
+    end
+
+    local handle = tool:FindFirstChild("Handle")
+    if handle and handle:IsA("BasePart") then
+        local grip2 = handle:FindFirstChild("RightGrip")
+        if grip2 then pcall(function() grip2:Destroy() end) end
+        handle.Transparency = 1
+        handle.CanCollide = false
+    end
+end
+
 -- Dispatches paint tool remote packets WITHOUT forcing player to visibly hold tool
 -- and WITHOUT teleporting HumanoidRootPart (prevents camera/character glitching!)
 local function DispatchPaintToolRemote(part, colorToPaint)
     local char = L.Character
-    local bp = L:FindFirstChildOfClass("Backpack")
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp or not part or not part.Parent then return end
 
-    local Dtool = (bp and bp:FindFirstChild("Paint")) or (char and char:FindFirstChild("Paint"))
+    local Dtool = GetPaintTool()
     if not Dtool then return end
+
+    -- Make game recognize tool as active without player visibly holding it
+    MaintainFakeEquippedPaintTool()
 
     local scriptFolder = Dtool:FindFirstChild("Script") or Dtool:FindFirstChild("F3X") or Dtool
     local event = scriptFolder and (scriptFolder:FindFirstChild("Event") or scriptFolder:FindFirstChild("RemoteEvent"))
@@ -643,19 +695,11 @@ local function DispatchPaintToolRemote(part, colorToPaint)
             pcall(function() Dtool:Activate() end)
         end
     else
-        local currentEquipped = char:FindFirstChildOfClass("Tool")
-        if currentEquipped ~= Dtool and hum then
+        -- Alternate tool remote structure
+        local altRemote = Dtool:FindFirstChildWhichIsA("RemoteEvent", true)
+        if altRemote then
             pcall(function()
-                Dtool.Parent = char
-                local sc = Dtool:FindFirstChild("Script")
-                local ev = sc and sc:FindFirstChild("Event")
-                if ev then
-                    ev:FireServer(part, SidesList[1], part.Position, "both 🤝", colorToPaint, "", "")
-                end
-                Dtool.Parent = bp
-                if currentEquipped and currentEquipped.Parent == bp then
-                    hum:EquipTool(currentEquipped)
-                end
+                altRemote:FireServer(part, SidesList[1], part.Position, "both 🤝", colorToPaint, "", "")
             end)
         end
     end
@@ -671,9 +715,16 @@ TRainbow.MouseButton1Click:Connect(function()
     if IsRainbowActive then
         TRainbow.Text = "Fast Rainbow: ON"
         TRainbow.BackgroundColor3 = Color3.fromRGB(40, 190, 80)
+        MaintainFakeEquippedPaintTool()
     else
         TRainbow.Text = "Fast Rainbow: OFF"
         TRainbow.BackgroundColor3 = Color3.fromRGB(130, 45, 175)
+        -- Return tool to backpack cleanly when disabled
+        local tool = GetPaintTool()
+        local bp = L:FindFirstChildOfClass("Backpack")
+        if tool and bp and tool.Parent == L.Character then
+            pcall(function() tool.Parent = bp end)
+        end
     end
 end)
 
@@ -682,9 +733,42 @@ TPaintBtn.MouseButton1Click:Connect(function()
     if IsPaintActive then
         TPaintBtn.Text = "Paint Blocks: ON"
         TPaintBtn.BackgroundColor3 = Color3.fromRGB(50, 180, 50)
+        MaintainFakeEquippedPaintTool()
     else
         TPaintBtn.Text = "Paint Blocks: OFF"
         TPaintBtn.BackgroundColor3 = Color3.fromRGB(140, 50, 50)
+    end
+end)
+
+-- Continuously preserve fake-equipped status when rainbow is active
+R.Stepped:Connect(function()
+    if IsRainbowActive or IsPaintActive then
+        MaintainFakeEquippedPaintTool()
+    end
+end)
+
+-- Dedicated Fast Rainbow Broadcast Loop (Runs continuously, rainbowfying all blocks!)
+task.spawn(function()
+    while task.wait(0.03) and S.Parent do
+        if IsRainbowActive and #CP > 0 then
+            MaintainFakeEquippedPaintTool()
+            local timeTick = os.clock() * RainbowSpeed
+            local total = #CP
+            for i, part in ipairs(CP) do
+                if part and part.Parent then
+                    local rainbowHue = (timeTick + (i / math.max(1, total))) % 1
+                    local rainbowColor = Color3.fromHSV(rainbowHue, 1, 1)
+                    part.Color = rainbowColor
+                    DispatchPaintToolRemote(part, rainbowColor)
+                end
+            end
+        elseif IsPaintActive and #CP > 0 then
+            for _, part in ipairs(CP) do
+                if part and part.Parent then
+                    ForcePaintBlockServerSided(part)
+                end
+            end
+        end
     end
 end)
 
@@ -702,36 +786,34 @@ local function VLD(O)
     return true
 end
 
--- Block Gathering & High-Frequency Rainbow Loop
+-- Persistent Part Index Gathering Engine:
+-- Preserves existing parts in CP at their EXACT indexes so no blocks ever swap positions or jump!
 local function CC()
-    local newCP = {}
     local LIM = GETLIMIT()
-    for _, O in ipairs(workspace:GetDescendants()) do
-        if #newCP >= LIM then break end
-        if VLD(O) then
-            NeutralizePhysics(O)
-            table.insert(newCP, O)
-        end
-    end
-    CP = newCP
+    local kept = {}
+    local existingSet = {}
 
-    -- Rapid Rainbow Execution: Fast color waves across all blocks simultaneously
-    if IsRainbowActive and (os.clock() - LastRainbowUse > 0.02) then
-        LastRainbowUse = os.clock()
-        local timeTick = os.clock() * RainbowSpeed
-        for i, part in ipairs(CP) do
-            local rainbowHue = (timeTick + (i / math.max(1, #CP))) % 1
-            local rainbowColor = Color3.fromHSV(rainbowHue, 1, 1)
-            part.Color = rainbowColor
-            -- Broadcasts paint packets so color is FE Server-Sided
-            DispatchPaintToolRemote(part, rainbowColor)
-        end
-    elseif IsPaintActive and (os.clock() - LastToolUse > 0.1) then
-        LastToolUse = os.clock()
-        for _, part in ipairs(CP) do
-            ForcePaintBlockServerSided(part)
+    -- 1. Retain all valid existing parts in CP at their exact positions
+    for _, p in ipairs(CP) do
+        if p and p.Parent and VLD(p) and #kept < LIM then
+            table.insert(kept, p)
+            existingSet[p] = true
         end
     end
+
+    -- 2. Only append newly discovered unanchored blocks to the end
+    if #kept < LIM then
+        for _, O in ipairs(workspace:GetDescendants()) do
+            if #kept >= LIM then break end
+            if not existingSet[O] and VLD(O) then
+                ClaimPartFE(O)
+                table.insert(kept, O)
+                existingSet[O] = true
+            end
+        end
+    end
+
+    CP = kept
 end
 
 -- Floor Distance Helper
@@ -1022,9 +1104,10 @@ TSnake.MouseButton1Click:Connect(function()
 end)
 
 -- ========================================================
--- 9. ANIMATED SHARK MORPH (SWIMMING TAIL, FINS & EYE BLINK)
+-- 9. ANIMATED SHARK MORPH (100% FE & PERSISTENT ANATOMY)
 -- Accurate shark colors: Slate Grey / Deep Blue body, white belly,
 -- dynamic swimming tail, pectoral fins and blinking painted eyes!
+-- Every block has its OWN unique non-overlapping spot.
 -- ========================================================
 TShark.MouseButton1Click:Connect(function()
     SWITCH_MODE("Shark")
@@ -1039,6 +1122,21 @@ TShark.MouseButton1Click:Connect(function()
     local eyeOpenColor = Color3.fromRGB(15, 15, 20)       -- Glossy Shark Eye
     local eyeClosedColor = sharkBodyColor                 -- Eye Lid matches body
 
+    local LastEyeState = false
+    local LastEyeBlinkTime = os.clock()
+    local EyesClosed = false
+
+    -- Server-sided initial shark paint: Colors the whole shark once on startup
+    task.spawn(function()
+        for i, PRT in ipairs(CP) do
+            if PRT and PRT.Parent then
+                local col = (i == 2 or i == 3) and eyeOpenColor or ((i % 2 == 0) and sharkBodyColor or sharkBellyColor)
+                PRT.Color = col
+                DispatchPaintToolRemote(PRT, col)
+            end
+        end
+    end)
+
     AC = R.RenderStepped:Connect(function(dt)
         local C = L.Character
         local Root = C and C:FindFirstChild("HumanoidRootPart")
@@ -1052,112 +1150,190 @@ TShark.MouseButton1Click:Connect(function()
         local speed = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
         local isMoving = speed > 0.5
         local swimRate = isMoving and math.clamp(speed * 1.8, 5, 16) or 3.2
+        local turnTilt = math.clamp(velocity.X * 0.05, -0.4, 0.4)
 
         -- Shark Eye Blinking Logic (Paints eye blocks to close/open eyes)
-        if os.clock() - LastEyeBlinkTime > 3.5 then
+        local now = os.clock()
+        if now - LastEyeBlinkTime > 3.8 then
             EyesClosed = true
-            if os.clock() - LastEyeBlinkTime > 3.75 then
+            if now - LastEyeBlinkTime > 4.05 then
                 EyesClosed = false
-                LastEyeBlinkTime = os.clock()
+                LastEyeBlinkTime = now
+            end
+        else
+            EyesClosed = false
+        end
+
+        -- Broadcast paint remote ONLY when eye state actually flips (prevents remote flooding!)
+        if EyesClosed ~= LastEyeState then
+            LastEyeState = EyesClosed
+            local eyeCol = EyesClosed and eyeClosedColor or eyeOpenColor
+            if CP[2] and CP[2].Parent then
+                CP[2].Color = eyeCol
+                DispatchPaintToolRemote(CP[2], eyeCol)
+            end
+            if CP[3] and CP[3].Parent then
+                CP[3].Color = eyeCol
+                DispatchPaintToolRemote(CP[3], eyeCol)
+            end
+        end
+
+        local totalBlocks = #CP
+        if totalBlocks == 0 then return end
+
+        -- PROCEDURAL ANATOMICAL SHARK MESH GENERATOR
+        -- Generates EXACTLY totalBlocks distinct coordinates so EVERY block has its own dedicated spot!
+        local offsets = {}
+        local colors = {}
+
+        -- Slot 1: Snout Tip
+        offsets[1] = Vector3.new(0, 0, -8.0)
+        colors[1] = sharkBodyColor
+
+        -- Slot 2 & 3: Left and Right Eyes (Dedicated eye blocks!)
+        if totalBlocks >= 2 then
+            offsets[2] = Vector3.new(-1.8, 0.8, -6.5)
+            colors[2] = EyesClosed and eyeClosedColor or eyeOpenColor
+        end
+        if totalBlocks >= 3 then
+            offsets[3] = Vector3.new(1.8, 0.8, -6.5)
+            colors[3] = EyesClosed and eyeClosedColor or eyeOpenColor
+        end
+
+        -- Slot 4: Upper Forehead
+        if totalBlocks >= 4 then
+            offsets[4] = Vector3.new(0, 1.0, -6.8)
+            colors[4] = sharkBodyColor
+        end
+
+        -- Slot 5 & 6: Lower Jaws
+        if totalBlocks >= 5 then
+            offsets[5] = Vector3.new(-1.2, -0.9, -6.0)
+            colors[5] = sharkBellyColor
+        end
+        if totalBlocks >= 6 then
+            offsets[6] = Vector3.new(1.2, -0.9, -6.0)
+            colors[6] = sharkBellyColor
+        end
+
+        -- Distribute remaining blocks into anatomical regions
+        local cur = 7
+        local remaining = math.max(0, totalBlocks - 6)
+
+        if remaining > 0 then
+            local dorsalCount = math.clamp(math.floor(remaining * 0.15), 1, 6)
+            local pectoralCount = math.clamp(math.floor(remaining * 0.20), 2, 8)
+            local pecSide = math.max(1, math.floor(pectoralCount / 2))
+            local headCount = math.clamp(math.floor(remaining * 0.15), 1, 6)
+            local tailCount = math.clamp(math.floor(remaining * 0.25), 2, 12)
+            local torsoCount = math.max(1, remaining - (dorsalCount + (pecSide * 2) + headCount + tailCount))
+
+            -- Head & Gills Flanks
+            for h = 1, headCount do
+                if cur > totalBlocks then break end
+                local frac = h / headCount
+                local z = -5.0 + (frac * 3.0)
+                local side = (h % 2 == 0) and 1 or -1
+                offsets[cur] = Vector3.new(side * 2.2, 0.2, z)
+                colors[cur] = sharkBodyColor
+                cur = cur + 1
+            end
+
+            -- Dorsal Fin (Top Blade rising with swim sway)
+            local finSway = math.sin(sharkTime * swimRate) * 0.25
+            for d = 1, dorsalCount do
+                if cur > totalBlocks then break end
+                local hFrac = d / dorsalCount
+                local y = 2.0 + (hFrac * 2.8)
+                local z = -1.2 + (hFrac * 1.5)
+                offsets[cur] = Vector3.new(finSway * hFrac, y, z)
+                colors[cur] = sharkBodyColor
+                cur = cur + 1
+            end
+
+            -- Pectoral Fins (Left Wing)
+            for p = 1, pecSide do
+                if cur > totalBlocks then break end
+                local pFrac = p / pecSide
+                local x = -2.5 - (pFrac * 4.2)
+                local y = -0.6 - (pFrac * 0.8) + (turnTilt * 1.5)
+                local z = -2.0 + (pFrac * 1.8)
+                offsets[cur] = Vector3.new(x, y, z)
+                colors[cur] = sharkBodyColor
+                cur = cur + 1
+            end
+
+            -- Pectoral Fins (Right Wing)
+            for p = 1, pecSide do
+                if cur > totalBlocks then break end
+                local pFrac = p / pecSide
+                local x = 2.5 + (pFrac * 4.2)
+                local y = -0.6 - (pFrac * 0.8) - (turnTilt * 1.5)
+                local z = -2.0 + (pFrac * 1.8)
+                offsets[cur] = Vector3.new(x, y, z)
+                colors[cur] = sharkBodyColor
+                cur = cur + 1
+            end
+
+            -- Torso Core (Streamlined Cylindrical Body)
+            for b = 1, torsoCount do
+                if cur > totalBlocks then break end
+                local bFrac = b / torsoCount
+                local z = -1.5 + (bFrac * 4.5)
+                local angle = b * 2.39996 -- Golden angle distribution around body cylinder
+                local radiusX = 2.2 * (1 - math.abs(bFrac - 0.4) * 0.4)
+                local radiusY = 1.6 * (1 - math.abs(bFrac - 0.4) * 0.4)
+                local x = math.cos(angle) * radiusX
+                local y = math.sin(angle) * radiusY
+                offsets[cur] = Vector3.new(x, y, z)
+                colors[cur] = (y < -0.2) and sharkBellyColor or sharkBodyColor
+                cur = cur + 1
+            end
+
+            -- Articulated Swimming Tail & Caudal Fins
+            for t = 1, tailCount do
+                if cur > totalBlocks then break end
+                local tFrac = t / tailCount
+                local swayX = math.sin((sharkTime * swimRate) - (tFrac * 2.8)) * (tFrac * 3.8)
+                local z = 3.2 + (tFrac * 9.5)
+                local y = 0
+                local col = sharkBodyColor
+
+                -- Tail tip lobes (Caudal Fin)
+                if t == tailCount then
+                    y = 2.4
+                    swayX = swayX * 1.2
+                elseif t == tailCount - 1 and tailCount > 2 then
+                    y = -2.0
+                    col = sharkBellyColor
+                    swayX = swayX * 1.2
+                else
+                    y = math.sin(t) * 0.4
+                    col = (y < -0.1) and sharkBellyColor or sharkBodyColor
+                end
+
+                offsets[cur] = Vector3.new(swayX, y, z)
+                colors[cur] = col
+                cur = cur + 1
+            end
+
+            -- Fallback for any leftover blocks
+            while cur <= totalBlocks do
+                local angle = cur * 1.5
+                offsets[cur] = Vector3.new(math.cos(angle) * 2, 0, (cur % 5))
+                colors[cur] = sharkBodyColor
+                cur = cur + 1
             end
         end
 
         local rootCF = Root.CFrame
-        local total = #CP
-        local snoutIndex = 1
-        local eyeLeftIndex = 2
-        local eyeRightIndex = 3
-
-        -- Construct Shark Anatomy Map
-        local sharkPoints = {}
-        local sharkColors = {}
-
-        -- Snout & Jaws
-        table.insert(sharkPoints, Vector3.new(0, 0, -8))
-        table.insert(sharkColors, sharkBodyColor)
-
-        -- Left & Right Eyes (Blinks by painting!)
-        table.insert(sharkPoints, Vector3.new(-1.8, 0.8, -6.5))
-        table.insert(sharkColors, EyesClosed and eyeClosedColor or eyeOpenColor)
-
-        table.insert(sharkPoints, Vector3.new(1.8, 0.8, -6.5))
-        table.insert(sharkColors, EyesClosed and eyeClosedColor or eyeOpenColor)
-
-        -- Head & Gills
-        for z = -5, -2, 1 do
-            table.insert(sharkPoints, Vector3.new(-2.2, 0.2, z))
-            table.insert(sharkColors, sharkBodyColor)
-            table.insert(sharkPoints, Vector3.new(2.2, 0.2, z))
-            table.insert(sharkColors, sharkBodyColor)
-            table.insert(sharkPoints, Vector3.new(0, -1.2, z))
-            table.insert(sharkColors, sharkBellyColor)
-        end
-
-        -- Dorsal Fin (Sways slightly on top)
-        local finSway = math.sin(sharkTime * swimRate) * 0.15
-        table.insert(sharkPoints, Vector3.new(finSway, 3.2, -1))
-        table.insert(sharkColors, sharkBodyColor)
-        table.insert(sharkPoints, Vector3.new(finSway * 1.5, 4.5, 0))
-        table.insert(sharkColors, sharkBodyColor)
-
-        -- Pectoral Left & Right Fins (Flare out & tilt when turning)
-        local turnTilt = math.clamp(velocity.X * 0.05, -0.4, 0.4)
-        table.insert(sharkPoints, Vector3.new(-4.5, -0.8 + turnTilt, -2))
-        table.insert(sharkColors, sharkBodyColor)
-        table.insert(sharkPoints, Vector3.new(-6.2, -1.2 + turnTilt, -1))
-        table.insert(sharkColors, sharkBodyColor)
-
-        table.insert(sharkPoints, Vector3.new(4.5, -0.8 - turnTilt, -2))
-        table.insert(sharkColors, sharkBodyColor)
-        table.insert(sharkPoints, Vector3.new(6.2, -1.2 - turnTilt, -1))
-        table.insert(sharkColors, sharkBodyColor)
-
-        -- Torso Core
-        for z = -1, 3, 1 do
-            table.insert(sharkPoints, Vector3.new(0, 1.2, z))
-            table.insert(sharkColors, sharkBodyColor)
-            table.insert(sharkPoints, Vector3.new(-2, 0, z))
-            table.insert(sharkColors, sharkBodyColor)
-            table.insert(sharkPoints, Vector3.new(2, 0, z))
-            table.insert(sharkColors, sharkBodyColor)
-            table.insert(sharkPoints, Vector3.new(0, -1.2, z))
-            table.insert(sharkColors, sharkBellyColor)
-        end
-
-        -- Articulated Swimming Tail (Sinusoidal lateral flexion)
-        local tailSegments = 8
-        for tIdx = 1, tailSegments do
-            local tailProgress = tIdx / tailSegments
-            local swayX = math.sin((sharkTime * swimRate) - (tIdx * 0.5)) * (tailProgress * 3.5)
-            local zPos = 3 + (tIdx * 1.5)
-            table.insert(sharkPoints, Vector3.new(swayX, 0, zPos))
-            table.insert(sharkColors, sharkBodyColor)
-
-            -- Caudal Tail Fin Tips (Upper and Lower lobes)
-            if tIdx == tailSegments then
-                table.insert(sharkPoints, Vector3.new(swayX * 1.2, 2.5, zPos + 1.5))
-                table.insert(sharkColors, sharkBodyColor)
-                table.insert(sharkPoints, Vector3.new(swayX * 1.2, -2.0, zPos + 1.2))
-                table.insert(sharkColors, sharkBellyColor)
-            end
-        end
-
-        local pCount = #sharkPoints
+        local lerpSpeed = math.clamp(BlockSpeed / 100, 0.35, 1.0)
 
         for i, PRT in ipairs(CP) do
             if PRT and PRT.Parent then
-                local pointIdx = ((i - 1) % pCount) + 1
-                local baseOffset = sharkPoints[pointIdx]
-                local targetColor = sharkColors[pointIdx] or sharkBodyColor
-
-                PRT.Color = targetColor
-                -- Broadcast eye blink or shark paint server-sided
-                if pointIdx == eyeLeftIndex or pointIdx == eyeRightIndex then
-                    DispatchPaintToolRemote(PRT, targetColor)
-                end
-
-                local targetCF = rootCF * CFrame.new(baseOffset)
-                UpdateFEPart(PRT, targetCF, GetBlockLerpSpeed())
+                local targetOffset = offsets[i] or Vector3.new(0, 0, 0)
+                local targetCF = rootCF * CFrame.new(targetOffset)
+                UpdateFEPart(PRT, targetCF, lerpSpeed)
             end
         end
 
