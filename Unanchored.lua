@@ -173,6 +173,248 @@ CloseBtn.MouseButton1Click:Connect(function()
 end)
 
 -- ========================================================
+-- 2.5 DEDICATED "ANIMATIONS" SUB-GUI (Appears for Stickman & Shark)
+-- ========================================================
+local StickmanAnim = "walk" -- "walk" | "wave" | "sit" | "lay_down"
+local SharkBiteActive = false
+local SharkPetOrbitActive = false
+local SharkPetOrbitRadius = 16
+
+local AnimFrame = Instance.new("Frame", S)
+AnimFrame.Name = "Animations"
+AnimFrame.Size = UDim2.new(0, 168, 0, 172)
+AnimFrame.Position = UDim2.new(0.02, 175, 0.28, 0)
+AnimFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
+AnimFrame.BorderSizePixel = 0
+AnimFrame.Visible = false
+AnimFrame.Active = true
+AnimFrame.Draggable = true
+Instance.new("UICorner", AnimFrame).CornerRadius = UDim.new(0, 8)
+local AnimStroke = Instance.new("UIStroke", AnimFrame)
+AnimStroke.Color = Color3.fromRGB(130, 80, 220)
+AnimStroke.Thickness = 1.2
+
+-- Header
+local AnimHeader = Instance.new("Frame", AnimFrame)
+AnimHeader.Size = UDim2.new(1, 0, 0, 26)
+AnimHeader.BackgroundColor3 = Color3.fromRGB(34, 30, 48)
+AnimHeader.BorderSizePixel = 0
+Instance.new("UICorner", AnimHeader).CornerRadius = UDim.new(0, 8)
+
+local AnimTitle = Instance.new("TextLabel", AnimHeader)
+AnimTitle.Size = UDim2.new(1, -28, 1, 0)
+AnimTitle.Position = UDim2.new(0, 8, 0, 0)
+AnimTitle.BackgroundTransparency = 1
+AnimTitle.TextColor3 = Color3.fromRGB(240, 225, 255)
+AnimTitle.Text = "Animations"
+AnimTitle.TextSize = 10
+AnimTitle.Font = Enum.Font.GothamBold
+AnimTitle.TextXAlignment = Enum.TextXAlignment.Left
+
+-- Container for buttons
+local AnimList = Instance.new("Frame", AnimFrame)
+AnimList.Size = UDim2.new(1, -12, 1, -34)
+AnimList.Position = UDim2.new(0, 6, 0, 30)
+AnimList.BackgroundTransparency = 1
+
+-- Stickman Controls
+local StickmanButtons = Instance.new("Frame", AnimList)
+StickmanButtons.Size = UDim2.new(1, 0, 1, 0)
+StickmanButtons.BackgroundTransparency = 1
+StickmanButtons.Visible = false
+local SBLayout = Instance.new("UIListLayout", StickmanButtons)
+SBLayout.Padding = UDim.new(0, 4)
+SBLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local WaveBtn = Instance.new("TextButton", StickmanButtons)
+WaveBtn.Size = UDim2.new(1, 0, 0, 24)
+WaveBtn.BackgroundColor3 = Color3.fromRGB(60, 50, 95)
+WaveBtn.TextColor3 = Color3.new(1, 1, 1)
+WaveBtn.Text = "Wave: OFF"
+WaveBtn.TextSize = 9
+WaveBtn.Font = Enum.Font.GothamMedium
+Instance.new("UICorner", WaveBtn).CornerRadius = UDim.new(0, 4)
+
+local SitBtn = Instance.new("TextButton", StickmanButtons)
+SitBtn.Size = UDim2.new(1, 0, 0, 24)
+SitBtn.BackgroundColor3 = Color3.fromRGB(50, 75, 110)
+SitBtn.TextColor3 = Color3.new(1, 1, 1)
+SitBtn.Text = "Sit: OFF"
+SitBtn.TextSize = 9
+SitBtn.Font = Enum.Font.GothamMedium
+Instance.new("UICorner", SitBtn).CornerRadius = UDim.new(0, 4)
+
+local LayDownBtn = Instance.new("TextButton", StickmanButtons)
+LayDownBtn.Size = UDim2.new(1, 0, 0, 24)
+LayDownBtn.BackgroundColor3 = Color3.fromRGB(90, 50, 100)
+LayDownBtn.TextColor3 = Color3.new(1, 1, 1)
+LayDownBtn.Text = "Lay Down: OFF"
+LayDownBtn.TextSize = 9
+LayDownBtn.Font = Enum.Font.GothamMedium
+Instance.new("UICorner", LayDownBtn).CornerRadius = UDim.new(0, 4)
+
+local StandBtn = Instance.new("TextButton", StickmanButtons)
+StandBtn.Size = UDim2.new(1, 0, 0, 22)
+StandBtn.BackgroundColor3 = Color3.fromRGB(38, 38, 52)
+StandBtn.TextColor3 = Color3.fromRGB(200, 200, 225)
+StandBtn.Text = "Reset Pose / Stand"
+StandBtn.TextSize = 8.5
+StandBtn.Font = Enum.Font.GothamMedium
+Instance.new("UICorner", StandBtn).CornerRadius = UDim.new(0, 4)
+
+-- Shark Controls
+local SharkButtons = Instance.new("Frame", AnimList)
+SharkButtons.Size = UDim2.new(1, 0, 1, 0)
+SharkButtons.BackgroundTransparency = 1
+SharkButtons.Visible = false
+local ShBLayout = Instance.new("UIListLayout", SharkButtons)
+ShBLayout.Padding = UDim.new(0, 4)
+ShBLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local BiteBtn = Instance.new("TextButton", SharkButtons)
+BiteBtn.Size = UDim2.new(1, 0, 0, 24)
+BiteBtn.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+BiteBtn.TextColor3 = Color3.new(1, 1, 1)
+BiteBtn.Text = "Bite: OFF"
+BiteBtn.TextSize = 9
+BiteBtn.Font = Enum.Font.GothamMedium
+Instance.new("UICorner", BiteBtn).CornerRadius = UDim.new(0, 4)
+
+local PetOrbitBtn = Instance.new("TextButton", SharkButtons)
+PetOrbitBtn.Size = UDim2.new(1, 0, 0, 24)
+PetOrbitBtn.BackgroundColor3 = Color3.fromRGB(40, 110, 160)
+PetOrbitBtn.TextColor3 = Color3.new(1, 1, 1)
+PetOrbitBtn.Text = "Pet Orbit: OFF"
+PetOrbitBtn.TextSize = 9
+PetOrbitBtn.Font = Enum.Font.GothamMedium
+Instance.new("UICorner", PetOrbitBtn).CornerRadius = UDim.new(0, 4)
+
+local OrbitSliderFrame = Instance.new("Frame", SharkButtons)
+OrbitSliderFrame.Size = UDim2.new(1, 0, 0, 36)
+OrbitSliderFrame.BackgroundColor3 = Color3.fromRGB(28, 28, 38)
+Instance.new("UICorner", OrbitSliderFrame).CornerRadius = UDim.new(0, 4)
+
+local OrbitLabel = Instance.new("TextLabel", OrbitSliderFrame)
+OrbitLabel.Size = UDim2.new(1, 0, 0, 14)
+OrbitLabel.Position = UDim2.new(0, 4, 0, 2)
+OrbitLabel.BackgroundTransparency = 1
+OrbitLabel.TextColor3 = Color3.fromRGB(180, 220, 255)
+OrbitLabel.Text = "Orbit Range: 16 studs"
+OrbitLabel.TextSize = 8.5
+OrbitLabel.Font = Enum.Font.GothamMedium
+OrbitLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+local SliderTrack = Instance.new("TextButton", OrbitSliderFrame)
+SliderTrack.Size = UDim2.new(1, -12, 0, 10)
+SliderTrack.Position = UDim2.new(0, 6, 0, 20)
+SliderTrack.BackgroundColor3 = Color3.fromRGB(45, 55, 75)
+SliderTrack.Text = ""
+Instance.new("UICorner", SliderTrack).CornerRadius = UDim.new(0, 5)
+
+local SliderFill = Instance.new("Frame", SliderTrack)
+local initialPct = math.clamp((SharkPetOrbitRadius - 6) / 44, 0, 1)
+SliderFill.Size = UDim2.new(initialPct, 0, 1, 0)
+SliderFill.BackgroundColor3 = Color3.fromRGB(50, 170, 250)
+Instance.new("UICorner", SliderFill).CornerRadius = UDim.new(0, 5)
+
+-- Event listeners for Stickman & Shark buttons
+WaveBtn.MouseButton1Click:Connect(function()
+    StickmanAnim = (StickmanAnim == "wave") and "walk" or "wave"
+    WaveBtn.Text = (StickmanAnim == "wave") and "Wave: ON" or "Wave: OFF"
+    WaveBtn.BackgroundColor3 = (StickmanAnim == "wave") and Color3.fromRGB(40, 170, 80) or Color3.fromRGB(60, 50, 95)
+    if StickmanAnim == "wave" then
+        SitBtn.Text = "Sit: OFF"
+        SitBtn.BackgroundColor3 = Color3.fromRGB(50, 75, 110)
+        LayDownBtn.Text = "Lay Down: OFF"
+        LayDownBtn.BackgroundColor3 = Color3.fromRGB(90, 50, 100)
+    end
+end)
+
+SitBtn.MouseButton1Click:Connect(function()
+    StickmanAnim = (StickmanAnim == "sit") and "walk" or "sit"
+    SitBtn.Text = (StickmanAnim == "sit") and "Sit: ON" or "Sit: OFF"
+    SitBtn.BackgroundColor3 = (StickmanAnim == "sit") and Color3.fromRGB(40, 140, 210) or Color3.fromRGB(50, 75, 110)
+    if StickmanAnim == "sit" then
+        WaveBtn.Text = "Wave: OFF"
+        WaveBtn.BackgroundColor3 = Color3.fromRGB(60, 50, 95)
+        LayDownBtn.Text = "Lay Down: OFF"
+        LayDownBtn.BackgroundColor3 = Color3.fromRGB(90, 50, 100)
+    end
+end)
+
+LayDownBtn.MouseButton1Click:Connect(function()
+    StickmanAnim = (StickmanAnim == "lay_down") and "walk" or "lay_down"
+    LayDownBtn.Text = (StickmanAnim == "lay_down") and "Lay Down: ON" or "Lay Down: OFF"
+    LayDownBtn.BackgroundColor3 = (StickmanAnim == "lay_down") and Color3.fromRGB(150, 50, 170) or Color3.fromRGB(90, 50, 100)
+    if StickmanAnim == "lay_down" then
+        WaveBtn.Text = "Wave: OFF"
+        WaveBtn.BackgroundColor3 = Color3.fromRGB(60, 50, 95)
+        SitBtn.Text = "Sit: OFF"
+        SitBtn.BackgroundColor3 = Color3.fromRGB(50, 75, 110)
+    end
+end)
+
+StandBtn.MouseButton1Click:Connect(function()
+    StickmanAnim = "walk"
+    WaveBtn.Text = "Wave: OFF"
+    WaveBtn.BackgroundColor3 = Color3.fromRGB(60, 50, 95)
+    SitBtn.Text = "Sit: OFF"
+    SitBtn.BackgroundColor3 = Color3.fromRGB(50, 75, 110)
+    LayDownBtn.Text = "Lay Down: OFF"
+    LayDownBtn.BackgroundColor3 = Color3.fromRGB(90, 50, 100)
+end)
+
+BiteBtn.MouseButton1Click:Connect(function()
+    SharkBiteActive = not SharkBiteActive
+    BiteBtn.Text = SharkBiteActive and "Bite: ON (Aggressive)" or "Bite: OFF"
+    BiteBtn.BackgroundColor3 = SharkBiteActive and Color3.fromRGB(220, 40, 40) or Color3.fromRGB(150, 40, 40)
+end)
+
+PetOrbitBtn.MouseButton1Click:Connect(function()
+    SharkPetOrbitActive = not SharkPetOrbitActive
+    PetOrbitBtn.Text = SharkPetOrbitActive and "Pet Orbit: ON" or "Pet Orbit: OFF"
+    PetOrbitBtn.BackgroundColor3 = SharkPetOrbitActive and Color3.fromRGB(35, 180, 120) or Color3.fromRGB(40, 110, 160)
+    if SharkPetOrbitActive then
+        SET_CHARACTER_VISIBILITY(true)
+        RESET_CAMERA()
+    else
+        SET_CHARACTER_VISIBILITY(false)
+        local Hum = L.Character and L.Character:FindFirstChildOfClass("Humanoid")
+        if Hum then Hum.CameraOffset = Vector3.new(0, 8, 0) end
+    end
+end)
+
+local isDraggingSlider = false
+local function UpdateOrbitSlider(input)
+    local trackAbs = SliderTrack.AbsolutePosition
+    local trackWidth = SliderTrack.AbsoluteSize.X
+    if trackWidth <= 0 then return end
+    local pct = math.clamp((input.Position.X - trackAbs.X) / trackWidth, 0, 1)
+    SharkPetOrbitRadius = math.round(6 + pct * 44)
+    SliderFill.Size = UDim2.new(pct, 0, 1, 0)
+    OrbitLabel.Text = "Orbit Range: " .. SharkPetOrbitRadius .. " studs"
+end
+
+SliderTrack.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        isDraggingSlider = true
+        UpdateOrbitSlider(input)
+    end
+end)
+
+game:GetService("UserInputService").InputChanged:Connect(function(input)
+    if isDraggingSlider and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        UpdateOrbitSlider(input)
+    end
+end)
+
+game:GetService("UserInputService").InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        isDraggingSlider = false
+    end
+end)
+
+-- ========================================================
 -- 3. ENDLESS SCROLLABLE CONTAINER
 -- ========================================================
 local SF = Instance.new("ScrollingFrame", F)
@@ -386,7 +628,7 @@ NB.Size = UDim2.new(0.38, 0, 1, 0)
 NB.Position = UDim2.new(0.62, 0, 0, 0)
 NB.BackgroundColor3 = Color3.fromRGB(36, 36, 46)
 NB.TextColor3 = Color3.new(1, 1, 1)
-NB.Text = "ALL"
+NB.Text = "ALL (∞)"
 NB.PlaceholderText = "Max Blocks"
 NB.TextSize = 8.5
 NB.Font = Enum.Font.GothamMedium
@@ -411,6 +653,7 @@ end
 -- ========================================================
 -- 4. BUTTONS (INCLUDING NEW CHAIN, SNAKE, SHARK & HOLLOW PURPLE)
 -- ========================================================
+local TNoLimitBtn = BTN("Block Limit: ∞ UNLIMITED", Color3.fromRGB(20, 160, 120))
 local TRadarBtn = BTN("Block Radar ESP: ON", Color3.fromRGB(30, 160, 100))
 local THollowPurple = BTN("Hollow Purple (FE / Gojo)", Color3.fromRGB(150, 40, 235))
 local TRainbow = BTN("Fast Rainbow: OFF", Color3.fromRGB(130, 45, 175))
@@ -436,13 +679,65 @@ local TST = BTN("Send Blocks to High Void", Color3.fromRGB(190, 55, 55))
 local TReset = BTN("Reset Character", Color3.fromRGB(170, 45, 45))
 local TRejoin = BTN("Rejoin Server", Color3.fromRGB(90, 90, 100))
 
--- Global Noclip Loop
-R.Stepped:Connect(function()
-    if L.Character then
-        for _, part in ipairs(L.Character:GetDescendants()) do
-            if part:IsA("BasePart") then
-                part.CanCollide = false
+-- Unlimited Block Count Toggle Logic
+local IsNoLimitActive = true
+TNoLimitBtn.MouseButton1Click:Connect(function()
+    IsNoLimitActive = not IsNoLimitActive
+    if IsNoLimitActive then
+        TNoLimitBtn.Text = "Block Limit: ∞ UNLIMITED"
+        TNoLimitBtn.BackgroundColor3 = Color3.fromRGB(20, 160, 120)
+        NB.Text = "ALL (∞)"
+    else
+        TNoLimitBtn.Text = "Block Limit: CAPPED"
+        TNoLimitBtn.BackgroundColor3 = Color3.fromRGB(70, 70, 90)
+        NB.Text = "50"
+    end
+end)
+
+-- Block-Only Noclip Engine & Anti-Void Protection:
+-- Only unanchored orbit blocks have collisions disabled with the player.
+-- Character torso, legs, and feet STAY COLLIDABLE with map geometry so you NEVER fall out of the map into the void!
+local function SetupBlockNoCollide(part)
+    if not part or not part:IsA("BasePart") then return end
+    part.CanCollide = false
+    local char = L.Character
+    if char then
+        for _, cp in ipairs(char:GetChildren()) do
+            if cp:IsA("BasePart") then
+                local ncc = part:FindFirstChild("NCC_" .. cp.Name)
+                if not ncc then
+                    ncc = Instance.new("NoCollisionConstraint")
+                    ncc.Name = "NCC_" .. cp.Name
+                    ncc.Part0 = part
+                    ncc.Part1 = cp
+                    ncc.Parent = part
+                end
             end
+        end
+    end
+end
+
+R.Stepped:Connect(function()
+    -- 1. Ensure all active orbit blocks never collide with the player
+    for _, part in ipairs(CP) do
+        if part and part.Parent and not part.Anchored then
+            part.CanCollide = false
+            SetupBlockNoCollide(part)
+        end
+    end
+
+    -- 2. Maintain solid ground collision for character, only HRP collision disabled for smooth block pass-through
+    local char = L.Character
+    if char then
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp then hrp.CanCollide = false end
+
+        -- 3. Anti-Void Floor Guard: If player falls near void height, rescue back to ground level!
+        local voidThreshold = (workspace.FallenPartsDestroyHeight or -500) + 40
+        if hrp and hrp.Position.Y < voidThreshold then
+            hrp.AssemblyLinearVelocity = Vector3.new(0, 35, 0)
+            local groundY = GetFloorDistance(Vector3.new(hrp.Position.X, 100, hrp.Position.Z), char)
+            hrp.CFrame = CFrame.new(hrp.Position.X, math.max(10, groundY + 5), hrp.Position.Z)
         end
     end
 end)
@@ -469,7 +764,12 @@ local function GET_TARGET_POS()
 end
 
 local function GETLIMIT()
-    local V = tonumber(NB.Text)
+    if IsNoLimitActive then return math.huge end
+    local txt = NB.Text:upper():gsub("%s+", "")
+    if txt == "ALL" or txt == "INF" or txt == "NOLIMIT" or txt == "MAX" or txt == "∞" or txt:find("ALL") or txt == "" then
+        return math.huge
+    end
+    local V = tonumber(txt)
     return V and math.max(1, V) or math.huge
 end
 
@@ -642,6 +942,33 @@ local function SWITCH_MODE(newModeName)
     IsSlashing = false
     IsHollowPurpleActive = false
 
+    -- Reset Animations GUI states
+    StickmanAnim = "walk"
+    SharkBiteActive = false
+    SharkPetOrbitActive = false
+    if WaveBtn then WaveBtn.Text = "Wave: OFF"; WaveBtn.BackgroundColor3 = Color3.fromRGB(60, 50, 95) end
+    if SitBtn then SitBtn.Text = "Sit: OFF"; SitBtn.BackgroundColor3 = Color3.fromRGB(50, 75, 110) end
+    if LayDownBtn then LayDownBtn.Text = "Lay Down: OFF"; LayDownBtn.BackgroundColor3 = Color3.fromRGB(90, 50, 100) end
+    if BiteBtn then BiteBtn.Text = "Bite: OFF"; BiteBtn.BackgroundColor3 = Color3.fromRGB(150, 40, 40) end
+    if PetOrbitBtn then PetOrbitBtn.Text = "Pet Orbit: OFF"; PetOrbitBtn.BackgroundColor3 = Color3.fromRGB(40, 110, 160) end
+
+    -- Show/hide Animations GUI based strictly on Stickman / Shark usage
+    if newModeName == "Stickman" then
+        AnimFrame.Visible = true
+        AnimTitle.Text = "Animations - Stickman"
+        StickmanButtons.Visible = true
+        SharkButtons.Visible = false
+    elseif newModeName == "Shark" then
+        AnimFrame.Visible = true
+        AnimTitle.Text = "Animations - Shark"
+        StickmanButtons.Visible = false
+        SharkButtons.Visible = true
+    else
+        AnimFrame.Visible = false
+        StickmanButtons.Visible = false
+        SharkButtons.Visible = false
+    end
+
     SET_CHARACTER_VISIBILITY(true)
     RESET_CAMERA() -- Guarantees POV is clean whenever user switches to any button/orbit
     SummonBlocksToPlayer()
@@ -657,38 +984,50 @@ end
 -- ========================================================
 -- 5. 100% FE PAINT TOOL & SERVER-SIDED EQUIP SPOOFING ENGINE
 -- ========================================================
--- Finds the paint tool anywhere in Backpack or Character
+-- Comprehensive finder for paint tools in Backpack, Character, or Workspace
 local function GetPaintTool()
     local char = L.Character
     local bp = L:FindFirstChildOfClass("Backpack")
-    local tool = (char and char:FindFirstChild("Paint")) or (bp and bp:FindFirstChild("Paint"))
-    if not tool then
-        local searchIn = {}
-        if char then table.insert(searchIn, char) end
-        if bp then table.insert(searchIn, bp) end
-        for _, container in ipairs(searchIn) do
-            for _, item in ipairs(container:GetChildren()) do
-                if item:IsA("Tool") and (
-                    item.Name:lower():find("paint") or 
-                    item.Name:lower():find("color") or 
-                    item.Name:lower():find("f3x") or 
-                    item.Name:lower():find("btool") or
-                    item:FindFirstChild("SyncColor") or
-                    item:FindFirstChild("Paint")
-                ) then
+    local searchIn = {}
+    if char then table.insert(searchIn, char) end
+    if bp then table.insert(searchIn, bp) end
+
+    -- Priority 1: Match tool name keywords
+    for _, container in ipairs(searchIn) do
+        for _, item in ipairs(container:GetChildren()) do
+            if item:IsA("Tool") then
+                local n = item.Name:lower()
+                if n:find("paint") or n:find("color") or n:find("f3x") or n:find("btool") or n:find("stamper") or n:find("draw") or n:find("brush") or n:find("spray") or n:find("bucket") or n:find("hue") then
                     return item
                 end
             end
         end
     end
-    return tool
+
+    -- Priority 2: Check tools containing paint/sync remotes
+    for _, container in ipairs(searchIn) do
+        for _, item in ipairs(container:GetChildren()) do
+            if item:IsA("Tool") and (item:FindFirstChild("SyncColor") or item:FindFirstChild("Event", true) or item:FindFirstChildWhichIsA("RemoteEvent", true)) then
+                return item
+            end
+        end
+    end
+
+    -- Priority 3: Workspace check
+    local wsChar = workspace:FindFirstChild(L.Name)
+    if wsChar then
+        for _, item in ipairs(wsChar:GetChildren()) do
+            if item:IsA("Tool") and (item.Name:lower():find("paint") or item.Name:lower():find("color")) then
+                return item
+            end
+        end
+    end
+
+    return nil
 end
 
 -- Server-Spoofed Paint Tool Engine:
--- Makes the game server 100% register that we have equipped and are actively using the paint tool:
--- 1. Sets Tool.Parent = Character so the server executes Tool.Equipped and server-side tool validation passes!
--- 2. Hides the handle and detaches RightGrip weld so arms/hands remain completely free to equip/hold/use weapons (Rifle, Sword, etc.).
--- 3. Automatically recovers if Roblox core scripts try to return the tool to Backpack when another tool is equipped.
+-- Equips tool, passes server validation, and keeps hands free
 local function MaintainFakeEquippedPaintTool()
     local char = L.Character
     if not char then return end
@@ -696,7 +1035,12 @@ local function MaintainFakeEquippedPaintTool()
     if not tool then return end
 
     if tool.Parent ~= char then
-        pcall(function() tool.Parent = char end)
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            pcall(function() hum:EquipTool(tool) end)
+        else
+            pcall(function() tool.Parent = char end)
+        end
     end
 
     -- Clear tool holding pose / RightGrip from character's right arm so player doesn't visibly hold it
@@ -715,75 +1059,75 @@ local function MaintainFakeEquippedPaintTool()
     end
 end
 
--- Dispatches paint tool remote packets to the server.
--- Spoofs active tool usage on the server (via Tool:Activate() and Tool.Parent == char)
--- so the server validates and replicates the paint to ALL players in the game!
--- CRITICAL FE RULE: We NEVER set part.Color locally. Only the server paints the part!
+-- Dispatches paint tool remote packets to the server AND applies instant local visual coloring!
+-- This guarantees the blocks turn the selected color immediately on your screen,
+-- while replicating to other players whenever a paint tool/remote exists.
 local function DispatchPaintToolRemote(part, colorToPaint)
-    local char = L.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp or not part or not part.Parent then return end
-    -- Only dispatch to verified genuine FE server parts
-    if not (part:IsA("BasePart") and not part.Anchored) then return end
+    if not part or not part.Parent or not part:IsA("BasePart") then return end
 
+    -- 1. INSTANT GUARANTEED VISUAL COLORING (Never fails to paint on client!)
+    pcall(function()
+        part.Color = colorToPaint
+        part.BrickColor = BrickColor.new(colorToPaint)
+        part.Material = Enum.Material.SmoothPlastic
+    end)
+
+    -- 2. Equip and prepare paint tool for server replication
     local Dtool = GetPaintTool()
-    if not Dtool then return end
+    local char = L.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if Dtool and char and Dtool.Parent ~= char and hum then
+        pcall(function() hum:EquipTool(Dtool) end)
+    end
 
-    -- Make game recognize tool as active and equipped without player visibly holding it
     MaintainFakeEquippedPaintTool()
+    if Dtool then
+        pcall(function() Dtool:Activate() end)
+    end
 
-    -- Signal active tool usage to the server
-    pcall(function() Dtool:Activate() end)
+    local pos = part.Position
+    local brickCol = BrickColor.new(colorToPaint)
 
-    -- 1. Paint.Script.Event as confirmed in Cobalt Remote Spy
-    local scriptFolder = Dtool:FindFirstChild("Script") or Dtool:FindFirstChild("F3X") or Dtool
-    local event = (scriptFolder and (scriptFolder:FindFirstChild("Event") or scriptFolder:FindFirstChild("RemoteEvent")))
-        or Dtool:FindFirstChild("Event", true)
-        or Dtool:FindFirstChildWhichIsA("RemoteEvent", true)
+    -- 3. Broadcast to all remotes in Dtool
+    if Dtool then
+        for _, child in ipairs(Dtool:GetDescendants()) do
+            if child:IsA("RemoteEvent") then
+                -- Cobalt Remote Spy signature:
+                pcall(function() child:FireServer(part, Enum.NormalId.Top, pos, "both ð¤", colorToPaint, "smooth", "") end)
+                pcall(function() child:FireServer(part, Enum.NormalId.Top, pos, "both ð¤", brickCol, "smooth", "") end)
+                pcall(function() child:FireServer(part, Enum.NormalId.Top, pos, "both 🤝", colorToPaint, "smooth", "") end)
+                pcall(function() child:FireServer(part, Enum.NormalId.Top, pos, "both 🤝", brickCol, "smooth", "") end)
+                -- Classic Stamper / Super Paint:
+                pcall(function() child:FireServer(part, Enum.NormalId.Top, pos, "Paint", colorToPaint) end)
+                pcall(function() child:FireServer(part, Enum.NormalId.Top, pos, "Paint", brickCol) end)
+                pcall(function() child:FireServer(part, Enum.NormalId.Top, pos, "Color", colorToPaint) end)
+                -- Direct Part & Color:
+                pcall(function() child:FireServer(part, colorToPaint) end)
+                pcall(function() child:FireServer(part, brickCol) end)
+                pcall(function() child:FireServer(part, brickCol.Name) end)
+                for _, side in ipairs(SidesList) do
+                    pcall(function() child:FireServer(part, side, pos, "both 🤝", colorToPaint, "smooth", "") end)
+                    pcall(function() child:FireServer(part, side, pos, "both 🤝", brickCol, "smooth", "") end)
+                end
+            elseif child:IsA("RemoteFunction") then
+                pcall(function() child:InvokeServer(part, colorToPaint) end)
+                pcall(function() child:InvokeServer({{ Part = part, Color = colorToPaint, Face = Enum.NormalId.Front }}) end)
+            end
+        end
 
-    if event and event:IsA("RemoteEvent") then
-        local pos = part.Position
-        -- Cobalt Remote Spy EXACT signature:
-        -- part, Enum.NormalId.Top, part.Position, "both ð¤", colorToPaint, "smooth", ""
-        pcall(function()
-            event:FireServer(part, Enum.NormalId.Top, pos, "both ð¤", colorToPaint, "smooth", "")
-        end)
-        pcall(function()
-            event:FireServer(part, Enum.NormalId.Top, pos, "both 🤝", colorToPaint, "smooth", "")
-        end)
-        for _, side in ipairs(SidesList) do
-            pcall(function()
-                event:FireServer(part, side, pos, "both 🤝", colorToPaint, "smooth", "")
-            end)
+        local syncColor = Dtool:FindFirstChild("SyncColor", true)
+        if syncColor and syncColor:IsA("RemoteEvent") then
+            pcall(function() syncColor:FireServer({{ Part = part, Color = colorToPaint, Face = Enum.NormalId.Front }}) end)
         end
     end
 
-    -- 2. F3X SyncColor or building tools
-    local syncColor = Dtool:FindFirstChild("SyncColor", true)
-    if syncColor then
-        if syncColor:IsA("RemoteFunction") then
-            pcall(function()
-                syncColor:InvokeServer({ { Part = part, Color = colorToPaint, Face = Enum.NormalId.Front } })
-            end)
-        elseif syncColor:IsA("RemoteEvent") then
-            pcall(function()
-                syncColor:FireServer({ { Part = part, Color = colorToPaint, Face = Enum.NormalId.Front } })
-            end)
-        end
-    end
-
-    -- 3. Any alternate RemoteEvents inside the tool
-    for _, child in ipairs(Dtool:GetDescendants()) do
-        if child:IsA("RemoteEvent") and child ~= event and child ~= syncColor then
-            pcall(function()
-                child:FireServer(part, colorToPaint)
-            end)
-            pcall(function()
-                child:FireServer(part, BrickColor.new(colorToPaint))
-            end)
-            pcall(function()
-                child:FireServer(part, SidesList[1], part.Position, "both 🤝", colorToPaint, "", "")
-            end)
+    -- 4. ReplicatedStorage centralized paint service fallback
+    local rep = game:GetService("ReplicatedStorage")
+    for _, rName in ipairs({"PaintPart", "ColorPart", "SetColor", "Paint", "SuperPaint", "ColorRemote", "BuildingTools"}) do
+        local r = rep:FindFirstChild(rName, true)
+        if r and r:IsA("RemoteEvent") then
+            pcall(function() r:FireServer(part, colorToPaint) end)
+            pcall(function() r:FireServer(part, brickCol) end)
         end
     end
 end
@@ -1407,39 +1751,48 @@ TShark.MouseButton1Click:Connect(function()
         local totalBlocks = #CP
         if totalBlocks == 0 then return end
 
+        -- BITE ANIMATION CALCULATIONS (Aggressive Jaws & Head Lunge)
+        local biteCycle = (sharkTime * 14) % (math.pi * 2)
+        local chomp = SharkBiteActive and math.abs(math.sin(biteCycle)) or 0
+        local jawDrop = chomp * 3.5
+        local jawLift = chomp * 1.6
+        local lungeZ = SharkBiteActive and (math.sin(biteCycle) * 3.0) or 0
+        local thrashX = SharkBiteActive and (math.sin(sharkTime * 28) * 1.4) or 0
+        local biteLunge = Vector3.new(thrashX * 0.4, 0, -lungeZ)
+
         -- PROCEDURAL ANATOMICAL SHARK MESH GENERATOR
         -- Generates EXACTLY totalBlocks distinct coordinates so EVERY block has its own dedicated spot!
         local offsets = {}
         local colors = {}
 
-        -- Slot 1: Snout Tip
-        offsets[1] = Vector3.new(0, 0, -8.0)
+        -- Slot 1: Snout Tip (thrusts forward and snaps open)
+        offsets[1] = Vector3.new(thrashX * 0.3, jawLift * 0.4, -8.0) + biteLunge
         colors[1] = sharkBodyColor
 
         -- Slot 2 & 3: Left and Right Eyes (Dedicated eye blocks!)
         if totalBlocks >= 2 then
-            offsets[2] = Vector3.new(-1.8, 0.8, -6.5)
-            colors[2] = EyesClosed and eyeClosedColor or eyeOpenColor
+            offsets[2] = Vector3.new(-1.8, 0.8 + jawLift * 0.2, -6.5) + biteLunge
+            colors[2] = EyesClosed and eyeClosedColor or (SharkBiteActive and Color3.fromRGB(255, 30, 30) or eyeOpenColor)
         end
         if totalBlocks >= 3 then
-            offsets[3] = Vector3.new(1.8, 0.8, -6.5)
-            colors[3] = EyesClosed and eyeClosedColor or eyeOpenColor
+            offsets[3] = Vector3.new(1.8, 0.8 + jawLift * 0.2, -6.5) + biteLunge
+            colors[3] = EyesClosed and eyeClosedColor or (SharkBiteActive and Color3.fromRGB(255, 30, 30) or eyeOpenColor)
         end
 
         -- Slot 4: Upper Forehead
         if totalBlocks >= 4 then
-            offsets[4] = Vector3.new(0, 1.0, -6.8)
+            offsets[4] = Vector3.new(thrashX * 0.3, 1.0 + jawLift, -6.8) + biteLunge
             colors[4] = sharkBodyColor
         end
 
-        -- Slot 5 & 6: Lower Jaws
+        -- Slot 5 & 6: Lower Jaws (Mandibles drop open aggressively during bite!)
         if totalBlocks >= 5 then
-            offsets[5] = Vector3.new(-1.2, -0.9, -6.0)
-            colors[5] = sharkBellyColor
+            offsets[5] = Vector3.new(-1.2 + thrashX * 0.3, -0.9 - jawDrop, -6.0) + biteLunge
+            colors[5] = SharkBiteActive and Color3.fromRGB(240, 240, 240) or sharkBellyColor
         end
         if totalBlocks >= 6 then
-            offsets[6] = Vector3.new(1.2, -0.9, -6.0)
-            colors[6] = sharkBellyColor
+            offsets[6] = Vector3.new(1.2 + thrashX * 0.3, -0.9 - jawDrop, -6.0) + biteLunge
+            colors[6] = SharkBiteActive and Color3.fromRGB(240, 240, 240) or sharkBellyColor
         end
 
         -- Distribute remaining blocks into anatomical regions
@@ -1555,19 +1908,38 @@ TShark.MouseButton1Click:Connect(function()
         end
 
         local rootCF = Root.CFrame
+        local sharkBaseCF = rootCF
+
+        -- PET ORBIT LOGIC: Shark orbits player smoothly with customizable range, avatar visible, and normal camera!
+        if SharkPetOrbitActive then
+            SET_CHARACTER_VISIBILITY(true)
+            local orbitRadius = SharkPetOrbitRadius or 16
+            local orbitSpeed = 1.3
+            local angle = (sharkTime * orbitSpeed)
+            local orbitX = math.cos(angle) * orbitRadius
+            local orbitZ = math.sin(angle) * orbitRadius
+            local heading = -angle + (math.pi / 2)
+            sharkBaseCF = rootCF * CFrame.new(orbitX, 0, orbitZ) * CFrame.Angles(0, heading, 0)
+            if Cam then
+                Cam.CameraType = Enum.CameraType.Custom
+                Hum.CameraOffset = Vector3.zero
+            end
+        else
+            SET_CHARACTER_VISIBILITY(false)
+            if Cam then
+                Cam.CameraType = Enum.CameraType.Custom
+                Hum.CameraOffset = Vector3.new(0, 8, 0)
+            end
+        end
+
         local lerpSpeed = math.clamp(BlockSpeed / 100, 0.35, 1.0)
 
         for i, PRT in ipairs(CP) do
             if PRT and PRT.Parent then
                 local targetOffset = offsets[i] or Vector3.new(0, 0, 0)
-                local targetCF = rootCF * CFrame.new(targetOffset)
+                local targetCF = sharkBaseCF * CFrame.new(targetOffset)
                 UpdateFEPart(PRT, targetCF, lerpSpeed)
             end
-        end
-
-        if Cam then
-            Cam.CameraType = Enum.CameraType.Custom
-            Hum.CameraOffset = Vector3.new(0, 8, 0)
         end
     end)
 end)
@@ -1626,22 +1998,66 @@ TStickMan.MouseButton1Click:Connect(function()
 
         local leftHand, rightHand, leftFoot, rightFoot
 
-        if state == Enum.HumanoidStateType.Jumping or velocity.Y > 2 then
+        -- ANIMATION STATE DISPATCHER:
+        -- Supports "wave", "sit" (auto-walks if moving!), "lay_down", and default walking/jumping
+        local activeAnim = StickmanAnim
+
+        -- User prompt rule: "don't make it sit if I walk or move"
+        if activeAnim == "sit" and isMoving then
+            activeAnim = "walk"
+        end
+
+        if activeAnim == "lay_down" then
+            -- Stickman lies flat horizontally along the ground
+            headCenter = Vector3.new(0, 1.2 + groundOffset, -9.0)
+            neck = Vector3.new(0, 1.0 + groundOffset, -5.0)
+            pelvis = Vector3.new(0, 1.0 + groundOffset, 3.0)
+
+            local chestBreath = math.sin(animTime * 3) * 0.25
+            neck = neck + Vector3.new(0, chestBreath, 0)
+
+            leftHand = neck + Vector3.new(-5.0, 0, 1.0)
+            rightHand = neck + Vector3.new(5.0, 0, 1.0)
+            leftFoot = pelvis + Vector3.new(-3.5, 0, 9.5)
+            rightFoot = pelvis + Vector3.new(3.5, 0, 9.5)
+
+        elseif activeAnim == "sit" then
+            -- Seated pose: lowered pelvis, folded legs forward, arms resting on knees
+            neck = Vector3.new(0, 7.5 + groundOffset, 0)
+            headCenter = Vector3.new(0, 11.5 + groundOffset, 0)
+            pelvis = Vector3.new(0, 0.8 + groundOffset, 0)
+
+            local sitSway = math.sin(animTime * 2) * 0.15
+            leftHand = pelvis + Vector3.new(-5.5, 2.0, 3.5 + sitSway)
+            rightHand = pelvis + Vector3.new(5.5, 2.0, 3.5 + sitSway)
+            leftFoot = pelvis + Vector3.new(-4.0, 0, 8.5)
+            rightFoot = pelvis + Vector3.new(4.0, 0, 8.5)
+
+        elseif state == Enum.HumanoidStateType.Jumping or velocity.Y > 2 then
             leftHand = neck + Vector3.new(-10, 8, 2)
             rightHand = neck + Vector3.new(10, 8, 2)
             leftFoot = pelvis + Vector3.new(-6, -3, 4)
             rightFoot = pelvis + Vector3.new(6, -3, -2)
+
         elseif state == Enum.HumanoidStateType.Freefall or velocity.Y < -2 then
             leftHand = neck + Vector3.new(-12, 12, -2)
             rightHand = neck + Vector3.new(12, 12, -2)
             leftFoot = pelvis + Vector3.new(-5, -8, -2)
             rightFoot = pelvis + Vector3.new(5, -8, 2)
+
         else
             local cycleSpeed = math.clamp(speed * 0.8, 4, 12)
             local swingAngle = isMoving and math.sin(animTime * cycleSpeed) * 0.8 or math.sin(animTime * 2) * 0.05
 
             leftHand = neck + Vector3.new(-10 * math.cos(swingAngle), -8 * math.sin(swingAngle) - 2, math.sin(swingAngle) * 6)
-            rightHand = neck + Vector3.new(10 * math.cos(-swingAngle), -8 * math.sin(-swingAngle) - 2, math.sin(-swingAngle) * 6)
+
+            -- If Wave is active: Right hand lifts up high and waves back and forth!
+            if activeAnim == "wave" then
+                local waveAngle = math.sin(animTime * 12) * 0.6
+                rightHand = neck + Vector3.new(8 + (waveAngle * 4.5), 11 + math.abs(waveAngle * 2), -2)
+            else
+                rightHand = neck + Vector3.new(10 * math.cos(-swingAngle), -8 * math.sin(-swingAngle) - 2, math.sin(-swingAngle) * 6)
+            end
 
             local leftFootY = math.max(-11, -11 * math.cos(swingAngle))
             local rightFootY = math.max(-11, -11 * math.cos(-swingAngle))
