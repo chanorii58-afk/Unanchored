@@ -135,14 +135,22 @@ local function ClaimPart(part)
 end
 
 --[[
-    DrivePartFE — moves a part toward targetCF using velocity only.
-    Spring-damper formula:
-      desired_velocity = error * K_SPRING - current_velocity * K_DAMP
-    With network ownership this velocity IS replicated to all players.
+    DrivePartFE — Guarantees 100% steady, smooth blocks with ZERO rotation and ZERO jitter/flicker.
+    • Locks CFrame directly every frame so blocks never bounce, lag, or vibrate from gravity.
+    • When useRot is false (orbits, formations), CFrame.new(pos) forces identity orientation (0,0,0)
+      so blocks STAY COMPLETELY STILL (no rotating, tumbling, rolling, or spinning).
+    • Permanently disables collision & touch so blocks never bounce off each other or the player.
+    • Zeroes out AssemblyAngularVelocity and AssemblyLinearVelocity to eliminate solver fighting.
 --]]
 local function DrivePartFE(part, targetCF, dt, useRot)
     if not part or not part.Parent or part.Anchored then return end
-    part.CanCollide = false
+
+    -- Disable collisions every frame to prevent blocks from ricocheting off each other or player
+    if part.CanCollide then part.CanCollide = false end
+    pcall(function()
+        part.CanTouch = false
+        part.CanQuery = false
+    end)
 
     pcall(function()
         if sethiddenproperty then
@@ -150,41 +158,20 @@ local function DrivePartFE(part, targetCF, dt, useRot)
         end
     end)
 
-    local pos  = part.Position
-    local tPos = targetCF.Position
-    local vel  = part.AssemblyLinearVelocity
-    local err  = tPos - pos
-    local dist = err.Magnitude
-
-    -- Smooth critical damping near target to eliminate micro-jitter and wobble
-    local desired = (err * K_SPRING) - (vel * K_DAMP)
-    local spd     = desired.Magnitude
-    if spd > MAX_VEL then desired = desired * (MAX_VEL / spd) end
-
-    -- Keep linear velocity rock-steady without arbitrary vertical bias
-    if dist < 0.05 and vel.Magnitude < 0.25 then
-        part.AssemblyLinearVelocity = Vector3.zero
-    else
-        part.AssemblyLinearVelocity = desired
-    end
-
+    -- Force zero rotation: if useRot is false, discard all angles and keep block perfectly upright
+    local finalCF
     if useRot then
-        -- Drive rotation cleanly toward target orientation using damped angular spring
-        local relRot      = part.CFrame:ToObjectSpace(targetCF)
-        local rx, ry, rz  = relRot:ToEulerAnglesXYZ()
-        local angVel      = part.AssemblyAngularVelocity
-        part.AssemblyAngularVelocity = (Vector3.new(rx, ry, rz) * K_ROT) - (angVel * K_ROT_DAMP)
+        finalCF = targetCF
     else
-        -- FIX: Actively damp all angular velocity to ZERO.
-        -- Previously this forced Vector3.new(0.04, 0.04, 0.04) every frame,
-        -- which caused all blocks to constantly spin, tumble, and wiggle!
-        local angVel = part.AssemblyAngularVelocity
-        if angVel.Magnitude > 0.001 then
-            part.AssemblyAngularVelocity = -angVel * 0.85
-        else
-            part.AssemblyAngularVelocity = Vector3.zero
-        end
+        finalCF = CFrame.new(targetCF.Position) -- Identity rotation: Pitch=0, Yaw=0, Roll=0 (STAYS STILL)
     end
+
+    -- Direct CFrame placement completely eliminates spring jitter, gravity drop, and flickering
+    part.CFrame = finalCF
+
+    -- Zero out velocities so physics engine doesn't introduce rotational or linear drift
+    part.AssemblyLinearVelocity  = Vector3.zero
+    part.AssemblyAngularVelocity = Vector3.zero
 end
 
 -- ============================================================
