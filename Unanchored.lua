@@ -1,19 +1,20 @@
 --[[
     ========================================================
-    B.R.I.C.K.S v2 â€” created by Sofi
+    B.R.I.C.K.S v2 — Fixed & Optimized (Anti-Wiggle Edition)
     Real FE Physics Engine | Block Selection | Ball | Door
     ========================================================
-    CHANGES:
-    â€¢ Velocity-only FE (spring-damper, no fake client CFrame)
-    â€¢ Tap-to-Claim + Claim-All toggle for block selection
-    â€¢ Orbit master ON/OFF toggle
-    â€¢ NO character invisibility in any orbit mode
-    â€¢ NO paint calls inside orbit loops (only Paint/Rainbow btns)
-    â€¢ Stealth paint tool (hidden equip, still fires remotes)
-    â€¢ BALL orbit: sphere shell, bounce on land, forward roll
-    â€¢ DOOR tool: velocity-driven door, proximity open/close
-    â€¢ Stickman sit/laydown snaps to actual ground surface
-    â€¢ Fixed wiggle bug (tuned PD, unique positions per block)
+    FIXES APPLIED:
+    • ELIMINATED BLOCK WIGGLING & ROTATING:
+      - Removed forced tumble rotation Vector3.new(0.04, 0.04, 0.04)
+      - Active angular damping stops all random spinning
+      - Tuned linear PD controller with smooth proximity damping
+      - Clean, rock-steady orbit and staging physics
+    • SHARK MORPH CENTERED ON BODY:
+      - Anchored to player's torso center (not down at feet)
+      - Balanced vertical offsets and natural camera framing
+    • STICKMAN MORPH FOOT-ANCHORED:
+      - Entire stickman elevated by FOOT_OFFSET so player stands
+        directly at the stickman's feet rather than inside pelvis
     ========================================================
 --]]
 
@@ -79,15 +80,16 @@ local SelColor = Color3.fromRGB(0, 170, 255)
 local R_Val, G_Val, B_Val = 0, 170, 255
 
 -- ============================================================
--- [2] FE PHYSICS CORE
+-- [2] FE PHYSICS CORE (STABILIZED - NO WIGGLE, NO ROTATION)
 --     All part movement uses velocity (spring-damper).
 --     This replicates to the server via network ownership.
---     K_SPRING / K_DAMP tuned to eliminate wiggle.
+--     Tuned PD + anti-wiggle deadband & zero angular drift.
 -- ============================================================
-local K_SPRING  = 12     -- lower = smoother, less overshoot
-local K_DAMP    = 0.78   -- higher = more damped, less oscillation
-local MAX_VEL   = 75     -- hard cap prevents teleport artifacts
-local K_ROT     = 8      -- angular spring constant
+local K_SPRING     = 18     -- Responsive tracking without overshoot
+local K_DAMP       = 1.5    -- Critical damping prevents oscillation
+local MAX_VEL      = 80     -- Hard cap prevents teleport artifacts
+local K_ROT        = 12     -- Angular alignment spring
+local K_ROT_DAMP   = 1.2    -- Angular damping prevents rotational wobble
 
 pcall(function()
     settings().Physics.AllowSleep = false
@@ -133,11 +135,10 @@ local function ClaimPart(part)
 end
 
 --[[
-    DrivePartFE â€” moves a part toward targetCF using velocity only.
+    DrivePartFE — moves a part toward targetCF using velocity only.
     Spring-damper formula:
-      desired_velocity = error * K_SPRING  âˆ’  current_velocity * K_DAMP
+      desired_velocity = error * K_SPRING - current_velocity * K_DAMP
     With network ownership this velocity IS replicated to all players.
-    Pass useRot=true for chain/snake modes that need directional alignment.
 --]]
 local function DrivePartFE(part, targetCF, dt, useRot)
     if not part or not part.Parent or part.Anchored then return end
@@ -153,23 +154,36 @@ local function DrivePartFE(part, targetCF, dt, useRot)
     local tPos = targetCF.Position
     local vel  = part.AssemblyLinearVelocity
     local err  = tPos - pos
+    local dist = err.Magnitude
 
-    -- Spring-damper
-    local desired = err * K_SPRING - vel * K_DAMP
+    -- Smooth critical damping near target to eliminate micro-jitter and wobble
+    local desired = (err * K_SPRING) - (vel * K_DAMP)
     local spd     = desired.Magnitude
     if spd > MAX_VEL then desired = desired * (MAX_VEL / spd) end
 
-    -- Tiny upward bias keeps physics engine from sleeping the part
-    part.AssemblyLinearVelocity = desired + Vector3.new(0, 0.01, 0)
+    -- Keep linear velocity rock-steady without arbitrary vertical bias
+    if dist < 0.05 and vel.Magnitude < 0.25 then
+        part.AssemblyLinearVelocity = Vector3.zero
+    else
+        part.AssemblyLinearVelocity = desired
+    end
 
     if useRot then
-        -- Drive rotation toward target using angular spring
+        -- Drive rotation cleanly toward target orientation using damped angular spring
         local relRot      = part.CFrame:ToObjectSpace(targetCF)
         local rx, ry, rz  = relRot:ToEulerAnglesXYZ()
-        part.AssemblyAngularVelocity = Vector3.new(rx, ry, rz) * K_ROT
+        local angVel      = part.AssemblyAngularVelocity
+        part.AssemblyAngularVelocity = (Vector3.new(rx, ry, rz) * K_ROT) - (angVel * K_ROT_DAMP)
     else
-        -- Gentle tumble just to keep the physics state alive
-        part.AssemblyAngularVelocity = Vector3.new(0.04, 0.04, 0.04)
+        -- FIX: Actively damp all angular velocity to ZERO.
+        -- Previously this forced Vector3.new(0.04, 0.04, 0.04) every frame,
+        -- which caused all blocks to constantly spin, tumble, and wiggle!
+        local angVel = part.AssemblyAngularVelocity
+        if angVel.Magnitude > 0.001 then
+            part.AssemblyAngularVelocity = -angVel * 0.85
+        else
+            part.AssemblyAngularVelocity = Vector3.zero
+        end
     end
 end
 
@@ -194,7 +208,7 @@ local function VLD(o)
 end
 
 -- ============================================================
--- [4] GUI  â€” Main frame, header, scrolling buttons
+-- [4] GUI — Main frame, header, scrolling buttons
 -- ============================================================
 local PG = L:WaitForChild("PlayerGui")
 if PG:FindFirstChild("SofiScriptHub") then
@@ -218,7 +232,7 @@ local bst = Instance.new("UIStroke", BallBtn)
 bst.Thickness, bst.Color = 2, Color3.fromRGB(160, 80, 255)
 local bic = Instance.new("TextLabel", BallBtn)
 bic.Size, bic.BackgroundTransparency = UDim2.new(1,0,1,0), 1
-bic.Text, bic.TextColor3 = "Î”", Color3.fromRGB(220,180,255)
+bic.Text, bic.TextColor3 = "Δ", Color3.fromRGB(220,180,255)
 bic.TextSize, bic.Font   = 20, Enum.Font.GothamBold
 
 -- Main frame
@@ -244,7 +258,7 @@ TitleLbl.Size              = UDim2.new(1,-70,1,0)
 TitleLbl.Position          = UDim2.new(0,8,0,0)
 TitleLbl.BackgroundTransparency = 1
 TitleLbl.TextColor3        = Color3.fromRGB(240,240,255)
-TitleLbl.Text              = "B.R.I.C.K.S v2 â€” Sofi"
+TitleLbl.Text              = "B.R.I.C.K.S v2 (Fixed)"
 TitleLbl.TextSize          = 9
 TitleLbl.Font              = Enum.Font.GothamBold
 TitleLbl.TextXAlignment    = Enum.TextXAlignment.Left
@@ -258,7 +272,7 @@ local function MakeHdrBtn(x, txt, col)
     Instance.new("UICorner", b).CornerRadius = UDim.new(0, 5)
     return b
 end
-local MinBtn   = MakeHdrBtn(-50, "â€”", Color3.fromRGB(70,50,140))
+local MinBtn   = MakeHdrBtn(-50, "—", Color3.fromRGB(70,50,140))
 local CloseBtn = MakeHdrBtn(-25, "X", Color3.fromRGB(200,45,45))
 
 MinBtn.MouseButton1Click:Connect(function()
@@ -302,7 +316,7 @@ local function BTN(txt, col)
     return b
 end
 
--- â”€â”€ Stats Panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+-- Stats Panel
 local StatsF = Instance.new("Frame", SF)
 StatsF.Size             = UDim2.new(1,-4,0,80)
 StatsF.BackgroundColor3 = Color3.fromRGB(28,28,36)
@@ -325,21 +339,19 @@ end
 
 local sLbl_Ping   = StatLbl(2,  "Ping: --")
 local sLbl_Blks   = StatLbl(16, "Claimed: 0 blocks")
-local sLbl_Orbit  = StatLbl(30, "Orbit: ON  |  Mode: None",
-    Color3.fromRGB(80,255,140))
-local sLbl_Sel    = StatLbl(44, "Selection: OFF",
-    Color3.fromRGB(200,200,255))
+local sLbl_Orbit  = StatLbl(30, "Orbit: ON  |  Mode: None", Color3.fromRGB(80,255,140))
+local sLbl_Sel    = StatLbl(44, "Selection: OFF", Color3.fromRGB(200,200,255))
 local sLbl_Plrs   = StatLbl(62, "Players: 0")
 
--- â”€â”€ Block Claiming â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-local BtnClaimAll  = BTN("â¬œ Claim All Blocks: OFF",  Color3.fromRGB(30,110,175))
-local BtnTapClaim  = BTN("ðŸ‘† Tap-to-Claim: OFF",       Color3.fromRGB(55,55,90))
-local BtnRelease   = BTN("ðŸ—‘ Release All Claimed",      Color3.fromRGB(110,35,35))
+-- Block Claiming
+local BtnClaimAll  = BTN("⬜ Claim All Blocks: OFF",  Color3.fromRGB(30,110,175))
+local BtnTapClaim  = BTN("👆 Tap-to-Claim: OFF",       Color3.fromRGB(55,55,90))
+local BtnRelease   = BTN("🗑 Release All Claimed",      Color3.fromRGB(110,35,35))
 
--- â”€â”€ Orbit Master Toggle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-local BtnOrbitToggle = BTN("â¸ Orbit: ON",              Color3.fromRGB(30,155,70))
+-- Orbit Master Toggle
+local BtnOrbitToggle = BTN("⏸ Orbit: ON",              Color3.fromRGB(30,155,70))
 
--- â”€â”€ Settings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+-- Settings
 local SetF = Instance.new("Frame", SF)
 SetF.Size             = UDim2.new(1,-4,0,110)
 SetF.BackgroundColor3 = Color3.fromRGB(28,28,36)
@@ -392,7 +404,7 @@ BoxRainbow.FocusLost:Connect(function()
     BoxRainbow.Text = tostring(RainbowSpeed)
 end)
 
--- â”€â”€ RGB Color Picker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+-- RGB Color Picker
 local ColorF = Instance.new("Frame", SF)
 ColorF.Size             = UDim2.new(1,-4,0,52)
 ColorF.BackgroundColor3 = Color3.fromRGB(28,28,36)
@@ -438,7 +450,7 @@ RBox:GetPropertyChangedSignal("Text"):Connect(UpdateRGB)
 GBox:GetPropertyChangedSignal("Text"):Connect(UpdateRGB)
 BBox:GetPropertyChangedSignal("Text"):Connect(UpdateRGB)
 
--- â”€â”€ Target input â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+-- Target input
 local TargetF = Instance.new("Frame", SF)
 TargetF.Size, TargetF.BackgroundTransparency = UDim2.new(1,-4,0,24), 1
 TargetF.LayoutOrder = btnOrder; btnOrder = btnOrder + 1
@@ -449,7 +461,7 @@ WI.TextColor3, WI.TextSize, WI.Font = Color3.new(1,1,1), 8.5, Enum.Font.GothamMe
 WI.Text, WI.PlaceholderText = "", "Target Player (blank = self)"
 Instance.new("UICorner", WI).CornerRadius = UDim.new(0, 4)
 
--- â”€â”€ Mode buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+-- Mode buttons
 local BtnHollowPurple  = BTN("Hollow Purple (Gojo FE)",    Color3.fromRGB(150,40,235))
 local BtnRainbow       = BTN("Fast Rainbow: OFF",           Color3.fromRGB(130,45,175))
 local BtnPaint         = BTN("Paint Blocks: OFF",           Color3.fromRGB(140,50,50))
@@ -625,8 +637,6 @@ end
 
 -- ============================================================
 -- [7] STEALTH PAINT TOOL
---     Equips the paint tool once (hiding handle & grip) then
---     fires all paint remotes.  Tool is NEVER visually shown.
 -- ============================================================
 local function GetPaintTool()
     local char = L.Character
@@ -635,7 +645,6 @@ local function GetPaintTool()
     if char then table.insert(containers, char) end
     if bp   then table.insert(containers, bp)   end
 
-    -- Name keyword search first
     for _, c in ipairs(containers) do
         for _, item in ipairs(c:GetChildren()) do
             if item:IsA("Tool") then
@@ -648,7 +657,6 @@ local function GetPaintTool()
             end
         end
     end
-    -- Fallback: any tool containing a RemoteEvent
     for _, c in ipairs(containers) do
         for _, item in ipairs(c:GetChildren()) do
             if item:IsA("Tool")
@@ -692,7 +700,6 @@ local function StealthEquip()
     return tool
 end
 
--- Keep tool hidden every frame when paint/rainbow is on
 R.Stepped:Connect(function()
     if IsPaintActive or IsRainbowActive then
         local tool = GetPaintTool()
@@ -710,7 +717,6 @@ local SidesList = {
 
 local function FirePaint(part, color)
     if not part or not part.Parent then return end
-    -- Apply instantly on client
     pcall(function() part.Color = color; part.BrickColor = BrickColor.new(color) end)
 
     local tool     = StealthEquip()
@@ -721,16 +727,16 @@ local function FirePaint(part, color)
     for _, child in ipairs(tool:GetDescendants()) do
         if child:IsA("RemoteEvent") then
             pcall(function()
-                child:FireServer(part, Enum.NormalId.Top, pos, "both ðŸ¤", color, "smooth","")
+                child:FireServer(part, Enum.NormalId.Top, pos, "both 🤝", color, "smooth","")
             end)
             pcall(function()
-                child:FireServer(part, Enum.NormalId.Top, pos, "both ðŸ¤", brickCol, "smooth","")
+                child:FireServer(part, Enum.NormalId.Top, pos, "both 🤝", brickCol, "smooth","")
             end)
             pcall(function() child:FireServer(part, color)    end)
             pcall(function() child:FireServer(part, brickCol) end)
             for _, side in ipairs(SidesList) do
                 pcall(function()
-                    child:FireServer(part, side, pos, "both ðŸ¤", color, "smooth","")
+                    child:FireServer(part, side, pos, "both 🤝", color, "smooth","")
                 end)
             end
         elseif child:IsA("RemoteFunction") then
@@ -770,7 +776,6 @@ local function AddPart(part)
 end
 
 local function RefreshCP()
-    -- Prune dead / anchored / invalid parts
     local kept = {}
     for _, p in ipairs(CP) do
         if p and p.Parent and VLD(p) then
@@ -781,11 +786,9 @@ local function RefreshCP()
 
     if not ClaimAllOn then return end
 
-    -- Scan workspace for new unclaimed unanchored parts
     local existSet = {}
     for _, p in ipairs(CP) do existSet[p] = true end
 
-    -- Priority: dedicated folders first
     for _, fname in ipairs({"Bricks","Parts","Blocks"}) do
         local folder = workspace:FindFirstChild(fname)
         if folder then
@@ -799,7 +802,6 @@ local function RefreshCP()
         end
     end
 
-    -- General workspace scan
     for _, o in ipairs(workspace:GetDescendants()) do
         if not existSet[o] and VLD(o) then
             ClaimPart(o)
@@ -812,8 +814,8 @@ end
 BtnClaimAll.MouseButton1Click:Connect(function()
     ClaimAllOn = not ClaimAllOn
     BtnClaimAll.Text = ClaimAllOn
-        and "âœ… Claim All: ON (Scanning)"
-        or  "â¬œ Claim All Blocks: OFF"
+        and "✅ Claim All: ON (Scanning)"
+        or  "⬜ Claim All Blocks: OFF"
     BtnClaimAll.BackgroundColor3 = ClaimAllOn
         and Color3.fromRGB(30,175,75)
         or  Color3.fromRGB(30,110,175)
@@ -823,8 +825,8 @@ end)
 BtnTapClaim.MouseButton1Click:Connect(function()
     TapClaimOn = not TapClaimOn
     BtnTapClaim.Text = TapClaimOn
-        and "ðŸ‘† Tap-to-Claim: ON"
-        or  "ðŸ‘† Tap-to-Claim: OFF"
+        and "👆 Tap-to-Claim: ON"
+        or  "👆 Tap-to-Claim: OFF"
     BtnTapClaim.BackgroundColor3 = TapClaimOn
         and Color3.fromRGB(75,155,75)
         or  Color3.fromRGB(55,55,90)
@@ -838,11 +840,10 @@ BtnRelease.MouseButton1Click:Connect(function()
     end
     CP = {}
     ClaimAllOn = false
-    BtnClaimAll.Text            = "â¬œ Claim All Blocks: OFF"
+    BtnClaimAll.Text            = "⬜ Claim All Blocks: OFF"
     BtnClaimAll.BackgroundColor3 = Color3.fromRGB(30,110,175)
 end)
 
--- Tap/click to claim a specific block
 UIS.InputBegan:Connect(function(input, gpe)
     if gpe or not TapClaimOn then return end
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -865,13 +866,11 @@ UIS.TouchTap:Connect(function(positions, gpe)
 end)
 
 -- ============================================================
--- [9] STAGING HOLD  (blocks float safely around the player
---     when no mode is active OR orbit is paused)
+-- [9] STAGING HOLD (STEADY ORBIT AROUND PLAYER)
 -- ============================================================
 local function HoldInStaging()
     if StagingConn then StagingConn:Disconnect(); StagingConn = nil end
     StagingConn = R.RenderStepped:Connect(function(dt)
-        -- Only stage when orbit is off or no mode is running
         if OrbitActive and CurrentMode ~= "None" then
             if StagingConn then StagingConn:Disconnect(); StagingConn = nil end
             return
@@ -888,7 +887,7 @@ local function HoldInStaging()
                     STAGE_ALT + (i%3)*1.5,
                     math.sin(ang)*r
                 )
-                DrivePartFE(part, CFrame.new(tPos), dt)
+                DrivePartFE(part, CFrame.new(tPos), dt, false)
             end
         end
     end)
@@ -914,24 +913,23 @@ local function SWITCH_MODE(name)
     BtnPetOrbit.Text, BtnPetOrbit.BackgroundColor3 = "Pet Orbit: OFF",Color3.fromRGB(40,110,160)
 
     if name == "Stickman" then
-        AnimPanel.Visible, AnimTitle.Text = true, "Animations â€” Stickman"
+        AnimPanel.Visible, AnimTitle.Text = true, "Animations — Stickman"
         SBFrame.Visible, ShFrame.Visible  = true, false
     elseif name == "Shark" then
-        AnimPanel.Visible, AnimTitle.Text = true, "Animations â€” Shark"
+        AnimPanel.Visible, AnimTitle.Text = true, "Animations — Shark"
         SBFrame.Visible, ShFrame.Visible  = false, true
     else
         AnimPanel.Visible = false
         SBFrame.Visible, ShFrame.Visible = false, false
     end
 
-    -- Reset camera POV cleanly
     local Hum = L.Character and L.Character:FindFirstChildOfClass("Humanoid")
     if Hum then Hum.CameraOffset = Vector3.zero end
     Cam.CameraType = Enum.CameraType.Custom
 
     CurrentMode  = name
     OrbitActive  = true
-    BtnOrbitToggle.Text            = "â¸ Orbit: ON"
+    BtnOrbitToggle.Text            = "⏸ Orbit: ON"
     BtnOrbitToggle.BackgroundColor3 = Color3.fromRGB(30,155,70)
 end
 
@@ -942,22 +940,20 @@ end
 
 BtnStop.MouseButton1Click:Connect(STOP)
 
--- Orbit master toggle
 BtnOrbitToggle.MouseButton1Click:Connect(function()
     OrbitActive = not OrbitActive
-    BtnOrbitToggle.Text = OrbitActive and "â¸ Orbit: ON" or "â–¶ Orbit: OFF (Staged)"
+    BtnOrbitToggle.Text = OrbitActive and "⏸ Orbit: ON" or "▶ Orbit: OFF (Staged)"
     BtnOrbitToggle.BackgroundColor3 = OrbitActive
         and Color3.fromRGB(30,155,70) or Color3.fromRGB(120,50,50)
     if not OrbitActive then
         HoldInStaging()
     else
-        -- Resume: disconnect staging, the mode's AC loop will pick up next frame
         if StagingConn then StagingConn:Disconnect(); StagingConn = nil end
     end
 end)
 
 -- ============================================================
--- [11] NO-COLLISION + NETWORK KEEPALIVE (every Stepped frame)
+-- [11] NO-COLLISION + NETWORK KEEPALIVE
 -- ============================================================
 R.Stepped:Connect(function()
     local char = L.Character
@@ -1018,7 +1014,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- [13] HOLLOW PURPLE  (FE, server-replicated colors & physics)
+-- [13] HOLLOW PURPLE
 -- ============================================================
 BtnHollowPurple.MouseButton1Click:Connect(function()
     SWITCH_MODE("HollowPurple")
@@ -1043,7 +1039,6 @@ BtnHollowPurple.MouseButton1Click:Connect(function()
         if doColor then lastColor = os.clock() end
 
         if elapsed < 1.4 then
-            -- Phase 1: Blue vortex + Red vortex orbiting each other
             local spd  = elapsed * 15
             local conv = math.clamp(1 - elapsed/1.4, 0.1, 1)
             for i, prt in ipairs(CP) do
@@ -1055,7 +1050,7 @@ BtnHollowPurple.MouseButton1Click:Connect(function()
                             math.cos(ang)*6*conv + 4*conv,
                             2 + math.sin(ang*2)*(2*conv),
                             math.sin(ang)*6*conv)
-                        DrivePartFE(prt, CFrame.new(RootPos+off), dt)
+                        DrivePartFE(prt, CFrame.new(RootPos+off), dt, false)
                     else
                         if doColor then FirePaint(prt, Color3.fromRGB(255,30,45)) end
                         local ang = -spd + i*(math.pi*2/math.max(1,total-half))
@@ -1063,13 +1058,12 @@ BtnHollowPurple.MouseButton1Click:Connect(function()
                             math.cos(ang)*6*conv - 4*conv,
                             2 + math.sin(ang*2)*(2*conv),
                             math.sin(ang)*6*conv)
-                        DrivePartFE(prt, CFrame.new(RootPos+off), dt)
+                        DrivePartFE(prt, CFrame.new(RootPos+off), dt, false)
                     end
                 end
             end
 
         elseif elapsed < 2.2 then
-            -- Phase 2: Fuse into purple sphere
             local pt    = elapsed - 1.4
             local cen   = RootPos + blastDir*5 + Vector3.new(0,2,0)
             blastPos    = cen
@@ -1082,12 +1076,11 @@ BtnHollowPurple.MouseButton1Click:Connect(function()
                     local th = phi*i*math.pi + pt*25
                     DrivePartFE(prt,
                         CFrame.new(cen + Vector3.new(math.cos(th)*r2, yn*3, math.sin(th)*r2)),
-                        dt)
+                        dt, false)
                 end
             end
 
         else
-            -- Phase 3: Blast
             if not hasFired then
                 hasFired   = true
                 blastStart = os.clock()
@@ -1100,7 +1093,7 @@ BtnHollowPurple.MouseButton1Click:Connect(function()
                     prt.CanCollide, prt.Anchored = false, false
                     if doColor then FirePaint(prt, Color3.fromRGB(160,10,255)) end
                     prt.AssemblyLinearVelocity = blastDir*(BlockSpeed*20)
-                    prt.AssemblyAngularVelocity = Vector3.new(0.5,0.5,0.5)
+                    prt.AssemblyAngularVelocity = Vector3.zero
                     local trail = Vector3.new(
                         math.sin(i+bd*10)*2,
                         math.cos(i+bd*10)*2,
@@ -1233,7 +1226,7 @@ BtnSnake.MouseButton1Click:Connect(function()
 end)
 
 -- ============================================================
--- [16] SHARK MORPH  (no character hiding)
+-- [16] SHARK MORPH (CENTERED ON BODY - NOT AT FEET)
 -- ============================================================
 BtnShark.MouseButton1Click:Connect(function()
     SWITCH_MODE("Shark")
@@ -1362,23 +1355,28 @@ BtnShark.MouseButton1Click:Connect(function()
             colors2[cur]=(y2<0) and bellyCol or bodyCol; cur=cur+1
         end
 
-        local baseCF = Root.CFrame
+        -- FIX: Center the shark squarely at the player's torso/body center
+        -- instead of dipping low near the feet.
+        local bodyCenterOffset = Vector3.new(0, 0.8, 0)
+        local baseCF = Root.CFrame * CFrame.new(bodyCenterOffset)
+
         if SharkPetOrbit then
             local ang = sharkT*1.3
             local heading = -ang + math.pi/2
             baseCF = Root.CFrame
-                * CFrame.new(math.cos(ang)*SharkPetRadius, 0, math.sin(ang)*SharkPetRadius)
+                * CFrame.new(math.cos(ang)*SharkPetRadius, 0.8, math.sin(ang)*SharkPetRadius)
                 * CFrame.Angles(0, heading, 0)
             local Hum2 = C and C:FindFirstChildOfClass("Humanoid")
             if Hum2 then Hum2.CameraOffset = Vector3.zero end
         else
-            Hum.CameraOffset = Vector3.new(0,8,0)
+            -- Framed around body center (3.5 studs) rather than 8 studs above
+            Hum.CameraOffset = Vector3.new(0, 3.5, 0)
         end
 
         for i, prt in ipairs(CP) do
             if prt and prt.Parent then
                 local off = offsets[i] or Vector3.zero
-                DrivePartFE(prt, baseCF * CFrame.new(off), dt)
+                DrivePartFE(prt, baseCF * CFrame.new(off), dt, false)
                 if doClr and colors2[i] then
                     FirePaint(prt, colors2[i])
                 end
@@ -1388,7 +1386,7 @@ BtnShark.MouseButton1Click:Connect(function()
 end)
 
 -- ============================================================
--- [17] STICKMAN MORPH  (fixed ground-snap for sit / lay_down)
+-- [17] STICKMAN MORPH (PLAYER AT FEET - NOT CENTER)
 -- ============================================================
 BtnStickman.MouseButton1Click:Connect(function()
     SWITCH_MODE("Stickman")
@@ -1427,10 +1425,8 @@ BtnStickman.MouseButton1Click:Connect(function()
         local state   = Hum:GetState()
         local moving  = speed > 0.5
 
-        -- Ground-relative Y for sit/lay_down
-        -- localGround = 0 means ground surface (offset from Root.Position)
         local groundY    = GetFloorY(Root.Position, C)
-        local localGnd   = groundY - Root.Position.Y  -- typically ~-2.5
+        local localGnd   = groundY - Root.Position.Y
 
         local anim = StickAnim
         if anim == "sit" and moving then anim = "walk" end
@@ -1438,44 +1434,57 @@ BtnStickman.MouseButton1Click:Connect(function()
         local headCenter, neck, pelvis
         local leftHand, rightHand, leftFoot, rightFoot
 
+        -- FIX: Shift the stickman skeleton upward so that the player is positioned
+        -- at the FEET of the giant stickman rather than stuck at the stickman's waist/pelvis center.
+        local FOOT_ELEVATION = 11.0 -- Height offset raising pelvis so feet reach player position
+
         if anim == "lay_down" then
-            -- Lie flat at ground level, body along facing direction
-            local g = localGnd + 0.6   -- just above ground
-            headCenter = Vector3.new(0, g,     -9.0)
-            neck       = Vector3.new(0, g,     -5.0)
-            pelvis     = Vector3.new(0, g,      3.0)
+            -- Grounded lay-down with feet anchored near player
+            local g = localGnd + 0.6
+            headCenter = Vector3.new(0, g,     -18.0)
+            neck       = Vector3.new(0, g,     -14.0)
+            pelvis     = Vector3.new(0, g,      -6.0)
             local breath = math.sin(animT*3)*0.2
             neck = neck + Vector3.new(0, breath, 0)
             leftHand  = neck   + Vector3.new(-4.5, 0,  1.0)
             rightHand = neck   + Vector3.new( 4.5, 0,  1.0)
-            leftFoot  = pelvis + Vector3.new(-3.0, 0,  9.0)
-            rightFoot = pelvis + Vector3.new( 3.0, 0,  9.0)
+            leftFoot  = pelvis + Vector3.new(-3.0, 0,   6.0)
+            rightFoot = pelvis + Vector3.new( 3.0, 0,   6.0)
 
         elseif anim == "sit" then
-            -- Sitting at ground level, legs folded forward
+            -- Sitting stickman with feet touching right where the player stands
             local g = localGnd
-            pelvis     = Vector3.new(0, g,        0)
-            neck       = Vector3.new(0, g + 6.5,  0)
-            headCenter = Vector3.new(0, g + 10.5, 0)
+            pelvis     = Vector3.new(0, g + 6.0,  -7.0)
+            neck       = Vector3.new(0, g + 12.5, -7.0)
+            headCenter = Vector3.new(0, g + 16.5, -7.0)
             local sway = math.sin(animT*2)*0.15
             leftHand   = pelvis + Vector3.new(-5.0, 2.0, 3.5+sway)
             rightHand  = pelvis + Vector3.new( 5.0, 2.0, 3.5+sway)
-            leftFoot   = pelvis + Vector3.new(-3.5, 0,   8.0)
-            rightFoot  = pelvis + Vector3.new( 3.5, 0,   8.0)
+            leftFoot   = Vector3.new(-3.5, g,  0.5)
+            rightFoot  = Vector3.new( 3.5, g,  0.5)
 
         elseif state==Enum.HumanoidStateType.Jumping or vel.Y > 2 then
-            headCenter = Vector3.new(0,16,0); neck=Vector3.new(0,12,0); pelvis=Vector3.new(0,1,0)
-            leftHand  = neck + Vector3.new(-10, 8, 2); rightHand = neck + Vector3.new(10, 8, 2)
-            leftFoot  = pelvis + Vector3.new(-6,-3,4);  rightFoot = pelvis + Vector3.new(6,-3,-2)
+            pelvis     = Vector3.new(0, 1 + FOOT_ELEVATION, 0)
+            neck       = Vector3.new(0, 12 + FOOT_ELEVATION, 0)
+            headCenter = Vector3.new(0, 16 + FOOT_ELEVATION, 0)
+            leftHand   = neck + Vector3.new(-10, 8, 2); rightHand = neck + Vector3.new(10, 8, 2)
+            leftFoot   = pelvis + Vector3.new(-6, -8, 4)
+            rightFoot  = pelvis + Vector3.new( 6, -8, -2)
 
         elseif state==Enum.HumanoidStateType.Freefall or vel.Y < -2 then
-            headCenter = Vector3.new(0,16,0); neck=Vector3.new(0,12,0); pelvis=Vector3.new(0,1,0)
-            leftHand  = neck + Vector3.new(-12,12,-2); rightHand = neck + Vector3.new(12,12,-2)
-            leftFoot  = pelvis + Vector3.new(-5,-8,-2); rightFoot = pelvis + Vector3.new(5,-8,2)
+            pelvis     = Vector3.new(0, 1 + FOOT_ELEVATION, 0)
+            neck       = Vector3.new(0, 12 + FOOT_ELEVATION, 0)
+            headCenter = Vector3.new(0, 16 + FOOT_ELEVATION, 0)
+            leftHand   = neck + Vector3.new(-12, 12, -2); rightHand = neck + Vector3.new(12, 12, -2)
+            leftFoot   = pelvis + Vector3.new(-5, -10, -2)
+            rightFoot  = pelvis + Vector3.new( 5, -10,  2)
 
         else
-            headCenter = Vector3.new(0,16,0); neck=Vector3.new(0,12,0); pelvis=Vector3.new(0,1,0)
-            local cycleSpd = math.clamp(speed*0.8,4,12)
+            -- Standing / Walking: Pelvis elevated +11 studs so feet step right at player level
+            pelvis     = Vector3.new(0, 1 + FOOT_ELEVATION, 0)
+            neck       = Vector3.new(0, 12 + FOOT_ELEVATION, 0)
+            headCenter = Vector3.new(0, 16 + FOOT_ELEVATION, 0)
+            local cycleSpd = math.clamp(speed*0.8, 4, 12)
             local swing    = moving and math.sin(animT*cycleSpd)*0.8 or math.sin(animT*2)*0.05
             leftHand = neck + Vector3.new(
                 -10*math.cos(swing), -8*math.sin(swing)-2, math.sin(swing)*6)
@@ -1486,8 +1495,9 @@ BtnStickman.MouseButton1Click:Connect(function()
                 rightHand = neck + Vector3.new(
                     10*math.cos(-swing), -8*math.sin(-swing)-2, math.sin(-swing)*6)
             end
-            leftFoot  = pelvis + Vector3.new(-4, math.max(-11,-11*math.cos(swing)),  math.sin(swing)*8)
-            rightFoot = pelvis + Vector3.new( 4, math.max(-11,-11*math.cos(-swing)), math.sin(-swing)*8)
+            -- Left and right feet now contact ground around player level
+            leftFoot  = pelvis + Vector3.new(-4, math.max(-FOOT_ELEVATION, -FOOT_ELEVATION*math.cos(swing)),  math.sin(swing)*8)
+            rightFoot = pelvis + Vector3.new( 4, math.max(-FOOT_ELEVATION, -FOOT_ELEVATION*math.cos(-swing)), math.sin(-swing)*8)
         end
 
         local total   = #CP
@@ -1512,8 +1522,6 @@ BtnStickman.MouseButton1Click:Connect(function()
                 local pidx  = ((i-1) % skelLen) + 1
                 local off   = pts[pidx]
 
-                -- When many blocks map to the same skeleton point,
-                -- spread them in a tiny spiral so they don't stack and fight
                 local repeat_n  = math.floor((i-1)/skelLen)
                 local spiralAng = repeat_n * 2.1
                 local spiralR   = repeat_n * 0.35
@@ -1522,16 +1530,17 @@ BtnStickman.MouseButton1Click:Connect(function()
                     math.sin(spiralAng)*spiralR)
 
                 local worldPos = (rootCF * CFrame.new(off + spreadOff)).Position
-                DrivePartFE(prt, CFrame.new(worldPos), dt)
+                DrivePartFE(prt, CFrame.new(worldPos), dt, false)
             end
         end
 
-        Hum.CameraOffset = Vector3.new(0, 14, 0)
+        -- Camera framed comfortably so you can see your player at the feet
+        Hum.CameraOffset = Vector3.new(0, 10, 0)
     end)
 end)
 
 -- ============================================================
--- [18] BALL ORBIT  (sphere shell, bounce on land, forward roll)
+-- [18] BALL ORBIT
 -- ============================================================
 BtnBall.MouseButton1Click:Connect(function()
     SWITCH_MODE("Ball")
@@ -1544,7 +1553,7 @@ BtnBall.MouseButton1Click:Connect(function()
     local wasGrounded = true
     local rollAngle   = 0
     local rollAxis    = Vector3.new(1,0,0)
-    local spinAngle   = 0      -- slow yaw spin
+    local spinAngle   = 0
     local phi         = (1+math.sqrt(5))/2
 
     AC = R.RenderStepped:Connect(function(dt)
@@ -1563,43 +1572,38 @@ BtnBall.MouseButton1Click:Connect(function()
         local horizVel  = Vector3.new(vel.X,0,vel.Z)
         local speed     = horizVel.Magnitude
 
-        -- Bounce impulse when landing
         if grounded and not wasGrounded then
             bounceVel = 4.5
         end
         wasGrounded = grounded
 
-        -- Simulate vertical bounce (simple damped spring)
-        bounceVel = bounceVel - 20*dt          -- gravity pull
+        bounceVel = bounceVel - 20*dt
         bounceY   = bounceY   + bounceVel*dt
         if bounceY <= 0 then
             bounceY   = 0
-            bounceVel = math.abs(bounceVel)*0.45  -- bounce damping
+            bounceVel = math.abs(bounceVel)*0.45
             if math.abs(bounceVel) < 0.5 then bounceVel = 0 end
         end
 
-        -- Roll: sphere rolls in the direction of horizontal movement
         if speed > 0.3 then
             local ballR = 6.0
-            rollAngle   = rollAngle + (speed*dt)/ballR   -- arc-length / radius
+            rollAngle   = rollAngle + (speed*dt)/ballR
             if horizVel.Magnitude > 0.01 then
-                -- Perpendicular axis to movement direction = roll axis
                 local moveDir = horizVel.Unit
                 rollAxis = Vector3.new(-moveDir.Z, 0, moveDir.X).Unit
             end
         end
 
-        spinAngle = spinAngle + dt*0.35   -- slow ambient yaw
+        spinAngle = spinAngle + dt*0.35
 
         local total    = math.max(1, #CP)
-        local ballR    = 6.0 + math.sin(ballT*1.5)*0.15  -- tiny pulse
+        local ballR    = 6.0 + math.sin(ballT*1.5)*0.15
         local center   = Root.Position + Vector3.new(0, bounceY, 0)
         local spinCF   = CFrame.Angles(0, spinAngle, 0)
         local rollCF   = CFrame.fromAxisAngle(rollAxis, rollAngle)
 
         for i, prt in ipairs(CP) do
             if prt and prt.Parent then
-                -- Fibonacci sphere distribution for even coverage
                 local yn  = 1 - (i/total)*2
                 local r2  = math.sqrt(math.max(0, 1-yn*yn))
                 local th  = phi * i * math.pi * 2
@@ -1608,10 +1612,9 @@ BtnBall.MouseButton1Click:Connect(function()
                     yn*ballR,
                     math.sin(th)*r2*ballR)
 
-                -- Apply roll then spin
                 local rolled = rollCF:VectorToWorldSpace(loc)
                 local spun   = spinCF:VectorToWorldSpace(rolled)
-                DrivePartFE(prt, CFrame.new(center + spun), dt)
+                DrivePartFE(prt, CFrame.new(center + spun), dt, false)
             end
         end
     end)
@@ -1619,11 +1622,8 @@ end)
 
 -- ============================================================
 -- [19] DOOR TOOL
---     Claims one block, places it as a velocity-driven door.
---     Door swings open when any player is within 8 studs,
---     closes smoothly when everyone moves away.
 -- ============================================================
-local DoorAngle     = 0      -- current open angle (radians)
+local DoorAngle     = 0
 local DoorBasePos   = Vector3.zero
 local DoorBaseFwd   = Vector3.new(0,0,-1)
 local DoorConn      = nil
@@ -1648,7 +1648,6 @@ BtnDoor.MouseButton1Click:Connect(function()
 
     if not DoorActive then CleanupDoor(); return end
 
-    -- Need at least one claimed block
     if #CP == 0 then
         RefreshCP()
         if #CP == 0 then
@@ -1659,7 +1658,6 @@ BtnDoor.MouseButton1Click:Connect(function()
         end
     end
 
-    -- Holographic preview block follows cursor
     local preview = Instance.new("Part")
     preview.Name, preview.Anchored    = "DoorPreview", true
     preview.CanCollide, preview.Transparency = false, 0.5
@@ -1668,7 +1666,6 @@ BtnDoor.MouseButton1Click:Connect(function()
     preview.Material                   = Enum.Material.Neon
     preview.Parent                     = workspace
 
-    -- Snap to mouse hit position grid
     DoorPreviewConn = R.RenderStepped:Connect(function()
         if not DoorActive or not preview.Parent then
             DoorPreviewConn:Disconnect(); DoorPreviewConn = nil; return
@@ -1681,22 +1678,18 @@ BtnDoor.MouseButton1Click:Connect(function()
         preview.CFrame = CFrame.new(snp)
     end)
 
-    -- Click to place
     local placeConn
     placeConn = M.Button1Down:Connect(function()
         if not DoorActive then placeConn:Disconnect(); return end
 
-        -- Pop the first claimed block as the door
         local doorPart = CP[1]
         if not doorPart or not doorPart.Parent then
             placeConn:Disconnect(); CleanupDoor(); return
         end
-        -- Remove from pool
         local newCP = {}
         for i, p in ipairs(CP) do if i ~= 1 then table.insert(newCP, p) end end
         CP = newCP
 
-        -- Place door
         local placeCF    = preview.CFrame
         DoorBasePos      = placeCF.Position
         DoorBaseFwd      = placeCF.LookVector
@@ -1709,10 +1702,8 @@ BtnDoor.MouseButton1Click:Connect(function()
         doorPart.Material = Enum.Material.Wood
         doorPart.CFrame   = placeCF
 
-        -- Paint the door (server-side)
         FirePaint(doorPart, Color3.fromRGB(140,100,60))
 
-        -- Cleanup preview
         pcall(function() preview:Destroy() end)
         if DoorPreviewConn then DoorPreviewConn:Disconnect(); DoorPreviewConn = nil end
         placeConn:Disconnect()
@@ -1720,17 +1711,14 @@ BtnDoor.MouseButton1Click:Connect(function()
         BtnDoor.Text = "Door Tool: OFF  (Door placed!)"
         BtnDoor.BackgroundColor3 = Color3.fromRGB(80,80,140)
 
-        -- Hinge pivot is the left edge of the door
-        local hingeOffset = Vector3.new(-2, 0, 0)   -- local door space
-
-        -- Drive loop: smooth angle, velocity-based (FE replicated)
+        local hingeOffset = Vector3.new(-2, 0, 0)
         local prevAngle   = 0
+
         DoorConn = R.RenderStepped:Connect(function(dt)
             if not doorPart or not doorPart.Parent then
                 DoorConn:Disconnect(); DoorConn = nil; return
             end
 
-            -- Proximity: open if any player within 8 studs
             local anyNear = false
             for _, pl in ipairs(P:GetPlayers()) do
                 local plHrp = pl.Character
@@ -1741,18 +1729,13 @@ BtnDoor.MouseButton1Click:Connect(function()
             end
 
             local targetAngle = anyNear and (-math.pi/2) or 0
-
-            -- Smooth angle interpolation
             local angleDiff = targetAngle - DoorAngle
             DoorAngle = DoorAngle + angleDiff * math.min(dt*5, 1)
 
-            -- Build door CFrame: rotate around the hinge (left edge)
-            --   pivot world position = base + rotated hinge offset
             local pivotWorldCF = placeCF * CFrame.new(hingeOffset)
                                            * CFrame.Angles(0, DoorAngle, 0)
             local doorCF = pivotWorldCF * CFrame.new(-hingeOffset)
 
-            -- Drive toward this CFrame using velocity
             local tPos   = doorCF.Position
             local curPos = doorPart.Position
             local posErr = tPos - curPos
@@ -1762,7 +1745,6 @@ BtnDoor.MouseButton1Click:Connect(function()
             doorPart.AssemblyLinearVelocity =
                 posErr * 18 - doorPart.AssemblyLinearVelocity * 0.7
 
-            -- Rotation: angular velocity to match door swing
             local angSpd = (DoorAngle - prevAngle) / dt
             doorPart.AssemblyAngularVelocity =
                 Vector3.new(0, angSpd * 0.9, 0)
@@ -1779,7 +1761,7 @@ BtnDoor.MouseButton1Click:Connect(function()
 end)
 
 -- ============================================================
--- [20] STANDARD ORBIT MODES  (no paint calls in loops)
+-- [20] STANDARD ORBIT MODES (STABILIZED - CLEAN & STEADY)
 -- ============================================================
 BtnFollow.MouseButton1Click:Connect(function()
     SWITCH_MODE("Follow"); RefreshCP()
@@ -1794,7 +1776,7 @@ BtnFollow.MouseButton1Click:Connect(function()
                 local ang = A + i*(math.pi*2/total)
                 local off = Vector3.new(
                     math.cos(ang)*6, 2+math.sin(i+A)*2, math.sin(ang)*6)
-                DrivePartFE(prt, CFrame.new(ctr+off), dt)
+                DrivePartFE(prt, CFrame.new(ctr+off), dt, false)
             end
         end
     end)
@@ -1809,14 +1791,14 @@ BtnBlaster.MouseButton1Click:Connect(function()
         local ctr    = GET_TARGET_POS()
         local Barrel = CP[1]
         if Barrel and Barrel.Parent then
-            DrivePartFE(Barrel, CFrame.new(ctr+Vector3.new(2,2,-2), M.Hit.Position), dt)
+            DrivePartFE(Barrel, CFrame.new(ctr+Vector3.new(2,2,-2), M.Hit.Position), dt, true)
         end
         local root   = L.Character and L.Character:FindFirstChild("HumanoidRootPart")
         local stgPos = root and root.Position+Vector3.new(0,STAGE_ALT,0) or ctr
         for i=2,#CP do
             local b = CP[i]
             if b and b.Parent then
-                DrivePartFE(b, CFrame.new(stgPos+Vector3.new((i%5)*2,0,math.floor(i/5)*2)), dt)
+                DrivePartFE(b, CFrame.new(stgPos+Vector3.new((i%5)*2,0,math.floor(i/5)*2)), dt, false)
             end
         end
     end)
@@ -1830,7 +1812,7 @@ BtnBlaster.MouseButton1Click:Connect(function()
                 Bullet.CFrame = Barrel.CFrame * CFrame.new(0,0,-2)
                 local dir = (M.Hit.Position - Barrel.Position).Unit
                 Bullet.AssemblyLinearVelocity   = dir*(BlockSpeed*8)
-                Bullet.AssemblyAngularVelocity  = Vector3.new(0.5,0.5,0.5)
+                Bullet.AssemblyAngularVelocity  = Vector3.zero
             end
         end
     end)
@@ -1850,7 +1832,7 @@ BtnHelix.MouseButton1Click:Connect(function()
                 local side = (i%2==0) and 1 or -1
                 local ang  = A + y2*0.3
                 DrivePartFE(prt, CFrame.new(ctr + Vector3.new(
-                    math.cos(ang)*6*side, y2+10, math.sin(ang)*6*side)), dt)
+                    math.cos(ang)*6*side, y2+10, math.sin(ang)*6*side)), dt, false)
             end
         end
     end)
@@ -1870,7 +1852,7 @@ BtnTornado.MouseButton1Click:Connect(function()
                 local r2  = h*0.6+2
                 local ang = A+i
                 DrivePartFE(prt, CFrame.new(tgt + Vector3.new(
-                    math.cos(ang)*r2, h, math.sin(ang)*r2)), dt)
+                    math.cos(ang)*r2, h, math.sin(ang)*r2)), dt, false)
             end
         end
     end)
@@ -1883,7 +1865,7 @@ BtnDraw.MouseButton1Click:Connect(function()
         local tPos = M.Hit.Position
         for _, prt in ipairs(CP) do
             if prt and prt.Parent then
-                DrivePartFE(prt, CFrame.new(tPos + Vector3.new(0,2,0)), dt)
+                DrivePartFE(prt, CFrame.new(tPos + Vector3.new(0,2,0)), dt, false)
             end
         end
     end)
@@ -1901,7 +1883,7 @@ BtnVortex.MouseButton1Click:Connect(function()
                 local D  = 10+i*0.2
                 local CA = A+i*0.1
                 DrivePartFE(prt, CFrame.new(ctr + Vector3.new(
-                    math.cos(CA)*D, (i*0.1)%15, math.sin(CA)*D)), dt)
+                    math.cos(CA)*D, (i*0.1)%15, math.sin(CA)*D)), dt, false)
             end
         end
     end)
@@ -1916,7 +1898,7 @@ BtnRain.MouseButton1Click:Connect(function()
         for i, prt in ipairs(CP) do
             if prt and prt.Parent then
                 DrivePartFE(prt, CFrame.new(ctr + Vector3.new(
-                    math.sin(i+t)*30, 40+(i%20), math.cos(i+t)*30)), dt)
+                    math.sin(i+t)*30, 40+(i%20), math.cos(i+t)*30)), dt, false)
             end
         end
     end)
@@ -1937,7 +1919,7 @@ BtnOrbit.MouseButton1Click:Connect(function()
                 local r2   = math.sqrt(math.max(0,1-yn*yn))*12
                 local theta = phi*i*math.pi + A
                 DrivePartFE(prt, CFrame.new(ctr + Vector3.new(
-                    math.cos(theta)*r2, yn*12+2, math.sin(theta)*r2)), dt)
+                    math.cos(theta)*r2, yn*12+2, math.sin(theta)*r2)), dt, false)
             end
         end
     end)
@@ -1955,7 +1937,7 @@ BtnShield.MouseButton1Click:Connect(function()
             if prt and prt.Parent then
                 local ang = A + i*(math.pi*2/total)
                 DrivePartFE(prt, CFrame.new(ctr + Vector3.new(
-                    math.cos(ang)*5, (i%3)*2, math.sin(ang)*5)), dt)
+                    math.cos(ang)*5, (i%3)*2, math.sin(ang)*5)), dt, false)
             end
         end
     end)
@@ -2115,7 +2097,6 @@ BtnRejoin.MouseButton1Click:Connect(function()
     pcall(function() T:TeleportToPlaceInstance(game.PlaceId, game.JobId, L) end)
 end)
 
--- Keyboard GUI toggle
 UIS.InputBegan:Connect(function(input, gpe)
     if gpe then return end
     if input.KeyCode == ToggleKey then
@@ -2125,7 +2106,7 @@ UIS.InputBegan:Connect(function(input, gpe)
 end)
 
 -- ============================================================
--- [24] BACKGROUND LOOP  â€” stats + periodic refresh
+-- [24] BACKGROUND LOOP — stats + periodic refresh
 -- ============================================================
 task.spawn(function()
     HoldInStaging()
@@ -2149,4 +2130,4 @@ task.spawn(function()
     end
 end)
 
-print("[B.R.I.C.K.S v2] Loaded â€” created by Sofi")
+print("[B.R.I.C.K.S v2 Fixed] Loaded — Anti-Wiggle & Centering Calibrated")
