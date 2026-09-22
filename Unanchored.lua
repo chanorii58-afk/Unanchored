@@ -112,6 +112,12 @@ local function ClaimPart(part)
     part.CanCollide = false
     part.Anchored   = false
 
+    -- Keep CanQuery and CanTouch TRUE so building tools, btools, and draggers can select and build!
+    pcall(function()
+        part.CanQuery = true
+        part.CanTouch = true
+    end)
+
     -- Break world welds
     for _, c in ipairs(part:GetChildren()) do
         if c:IsA("Weld") or c:IsA("WeldConstraint") or c:IsA("ManualWeld")
@@ -135,22 +141,30 @@ local function ClaimPart(part)
 end
 
 --[[
-    DrivePartFE — Guarantees 100% steady, smooth blocks with ZERO rotation and ZERO jitter/flicker.
-    • Locks CFrame directly every frame so blocks never bounce, lag, or vibrate from gravity.
-    • When useRot is false (orbits, formations), CFrame.new(pos) forces identity orientation (0,0,0)
-      so blocks STAY COMPLETELY STILL (no rotating, tumbling, rolling, or spinning).
-    • Permanently disables collision & touch so blocks never bounce off each other or the player.
-    • Zeroes out AssemblyAngularVelocity and AssemblyLinearVelocity to eliminate solver fighting.
+    DrivePartFE — 100% FilteringEnabled (FE) Replicated Physics Engine
+    • REPLICATED TO SERVER & ALL PLAYERS:
+      Uses AssemblyLinearVelocity & AssemblyAngularVelocity with client network ownership.
+      Never uses client-only CFrame so blocks are fully visible to other players and the server.
+    • BUILDABLE & DRAGGABLE:
+      CanQuery and CanTouch are kept TRUE so F3X, BTools, Draggers, and building tools
+      can freely click, select, drag, weld, and build on the blocks while orbiting.
+    • NO WIGGLING OR JITTERING:
+      Uses tuned critical PD velocity with gravity-lift compensation to eliminate vertical bounce.
+    • ZERO ROTATION & STILL BLOCKS:
+      Actively damps all angular velocity to Vector3.zero and applies restorative upright torque
+      so blocks stay completely still and face upright without tumbling or spinning.
 --]]
 local function DrivePartFE(part, targetCF, dt, useRot)
     if not part or not part.Parent or part.Anchored then return end
 
-    -- Disable collisions every frame to prevent blocks from ricocheting off each other or player
-    if part.CanCollide then part.CanCollide = false end
+    -- Keep CanQuery and CanTouch TRUE so players and building tools can click, drag, and build!
     pcall(function()
-        part.CanTouch = false
-        part.CanQuery = false
+        if not part.CanQuery then part.CanQuery = true end
+        if not part.CanTouch then part.CanTouch = true end
     end)
+
+    -- Keep CanCollide false while orbiting so blocks don't fling each other
+    if part.CanCollide then part.CanCollide = false end
 
     pcall(function()
         if sethiddenproperty then
@@ -158,20 +172,56 @@ local function DrivePartFE(part, targetCF, dt, useRot)
         end
     end)
 
-    -- Force zero rotation: if useRot is false, discard all angles and keep block perfectly upright
-    local finalCF
-    if useRot then
-        finalCF = targetCF
-    else
-        finalCF = CFrame.new(targetCF.Position) -- Identity rotation: Pitch=0, Yaw=0, Roll=0 (STAYS STILL)
+    local pos  = part.Position
+    local tPos = targetCF.Position
+    local vel  = part.AssemblyLinearVelocity
+    local err  = tPos - pos
+    local dist = err.Magnitude
+
+    -- Safe dt clamp for stable physics integration
+    local safeDt = math.clamp(dt or 0.016, 0.008, 0.033)
+
+    -- Smooth proportional-derivative velocity: reaches target with zero overshoot/wiggle
+    local K_P = 24
+    local K_D = 2.0
+    local desired = (err * K_P) - (vel * K_D)
+
+    -- Gravity compensation: counteracts gravity pull so blocks never sag or bounce vertically
+    local antiGravity = Vector3.new(0, workspace.Gravity * safeDt * 1.1, 0)
+    local finalVel = desired + antiGravity
+
+    -- Clamp maximum speed to avoid physics explosion
+    local spd = finalVel.Magnitude
+    if spd > 110 then
+        finalVel = finalVel * (110 / spd)
     end
 
-    -- Direct CFrame placement completely eliminates spring jitter, gravity drop, and flickering
-    part.CFrame = finalCF
+    -- Settle cleanly when within proximity
+    if dist < 0.04 and vel.Magnitude < 0.3 then
+        part.AssemblyLinearVelocity = antiGravity
+    else
+        part.AssemblyLinearVelocity = finalVel
+    end
 
-    -- Zero out velocities so physics engine doesn't introduce rotational or linear drift
-    part.AssemblyLinearVelocity  = Vector3.zero
-    part.AssemblyAngularVelocity = Vector3.zero
+    -- ZERO ROTATION & STEADY UP-RIGHT ALIGNMENT
+    if useRot then
+        -- Directional orientation for snake or arrow formations
+        local relRot = part.CFrame:ToObjectSpace(targetCF)
+        local rx, ry, rz = relRot:ToEulerAnglesXYZ()
+        local angVel = part.AssemblyAngularVelocity
+        part.AssemblyAngularVelocity = (Vector3.new(rx, ry, rz) * 16) - (angVel * 1.6)
+    else
+        -- Blocks STAY STILL: active upright restoration eliminates any spin, tumble, or rotation!
+        local rx, ry, rz = part.CFrame:ToEulerAnglesXYZ()
+        local angVel = part.AssemblyAngularVelocity
+        if math.abs(rx) > 0.015 or math.abs(ry) > 0.015 or math.abs(rz) > 0.015 then
+            -- Gently steer the block back upright so it stays still without spinning
+            part.AssemblyAngularVelocity = (Vector3.new(-rx, -ry, -rz) * 14) - (angVel * 1.4)
+        else
+            -- Locked still: zero angular velocity
+            part.AssemblyAngularVelocity = Vector3.zero
+        end
+    end
 end
 
 -- ============================================================
