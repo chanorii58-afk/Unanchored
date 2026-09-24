@@ -139,9 +139,9 @@ end
     With network ownership this velocity IS replicated to all players.
     Pass useRot=true for chain/snake modes that need directional alignment.
 --]]
-local function DrivePartFE(part, targetCF, dt, useRot)
+local function DrivePartFE(part, targetCF, dt, useRot, keepCollide)
     if not part or not part.Parent then return end
-    part.CanCollide = false
+    if not keepCollide then part.CanCollide = false end
     part.Anchored   = false
 
     --[[
@@ -555,25 +555,30 @@ local function ResetStickBtns()
 end
 
 BtnWave.MouseButton1Click:Connect(function()
-    StickAnim = (StickAnim == "wave") and "walk" or "wave"
-    ResetStickBtns()
-    if StickAnim == "wave" then
-        BtnWave.Text, BtnWave.BackgroundColor3 = "Wave: ON", Color3.fromRGB(40,170,80)
+    local want = (StickAnim ~= "wave") and "wave" or "walk"
+    ResetStickBtns()   -- resets StickAnim to "walk" and clears all buttons
+    if want == "wave" then
+        StickAnim = "wave"
+        BtnWave.Text = "Wave: ON"
+        BtnWave.BackgroundColor3 = Color3.fromRGB(40,170,80)
     end
 end)
 BtnSit.MouseButton1Click:Connect(function()
-    StickAnim = (StickAnim == "sit") and "walk" or "sit"
+    local want = (StickAnim ~= "sit") and "sit" or "walk"
     ResetStickBtns()
-    if StickAnim == "sit" then
-        BtnSit.Text, BtnSit.BackgroundColor3 = "Sit: ON", Color3.fromRGB(40,140,210)
+    if want == "sit" then
+        StickAnim = "sit"
+        BtnSit.Text = "Sit: ON"
+        BtnSit.BackgroundColor3 = Color3.fromRGB(40,140,210)
     end
 end)
 BtnLayDown.MouseButton1Click:Connect(function()
-    StickAnim = (StickAnim == "lay_down") and "walk" or "lay_down"
+    local want = (StickAnim ~= "lay_down") and "lay_down" or "walk"
     ResetStickBtns()
-    if StickAnim == "lay_down" then
-        BtnLayDown.Text, BtnLayDown.BackgroundColor3 =
-            "Lay Down: ON", Color3.fromRGB(150,50,170)
+    if want == "lay_down" then
+        StickAnim = "lay_down"
+        BtnLayDown.Text = "Lay Down: ON"
+        BtnLayDown.BackgroundColor3 = Color3.fromRGB(150,50,170)
     end
 end)
 BtnStand.MouseButton1Click:Connect(ResetStickBtns)
@@ -1252,17 +1257,8 @@ BtnShark.MouseButton1Click:Connect(function()
     local eyeOpen  = Color3.fromRGB(15,15,20)
     local eyeState = false
     local lastBlink= os.clock()
-    local lastClr  = 0
 
-    task.spawn(function()
-        for i, prt in ipairs(CP) do
-            if prt and prt.Parent then
-                local col = (i==2 or i==3) and eyeOpen
-                    or ((i%2==0) and bodyCol or bellyCol)
-                FirePaint(prt, col)
-            end
-        end
-    end)
+    -- (paint removed: shark uses block original colors)
 
     AC = R.RenderStepped:Connect(function(dt)
         if not OrbitActive then return end
@@ -1283,9 +1279,6 @@ BtnShark.MouseButton1Click:Connect(function()
             eyeState = true
             if now-lastBlink > 4.05 then eyeState=false; lastBlink=now end
         else eyeState=false end
-
-        local doClr = (now-lastClr > 0.3)
-        if doClr then lastClr=now end
 
         local biteCyc = (sharkT*14)%(math.pi*2)
         local chomp   = SharkBite and math.abs(math.sin(biteCyc)) or 0
@@ -1385,9 +1378,7 @@ BtnShark.MouseButton1Click:Connect(function()
             if prt and prt.Parent then
                 local off = offsets[i] or Vector3.zero
                 DrivePartFE(prt, baseCF * CFrame.new(off), dt)
-                if doClr and colors2[i] then
-                    FirePaint(prt, colors2[i])
-                end
+
             end
         end
     end)
@@ -1470,17 +1461,20 @@ BtnStickman.MouseButton1Click:Connect(function()
             rightFoot  = pelvis + Vector3.new( 3.5, 0,   8.0)
 
         elseif state==Enum.HumanoidStateType.Jumping or vel.Y > 2 then
-            headCenter = Vector3.new(0,16,0); neck=Vector3.new(0,12,0); pelvis=Vector3.new(0,1,0)
+            local pY = localGnd + 11
+            headCenter=Vector3.new(0,pY+15,0); neck=Vector3.new(0,pY+11,0); pelvis=Vector3.new(0,pY,0)
             leftHand  = neck + Vector3.new(-10, 8, 2); rightHand = neck + Vector3.new(10, 8, 2)
-            leftFoot  = pelvis + Vector3.new(-6,-3,4);  rightFoot = pelvis + Vector3.new(6,-3,-2)
+            leftFoot  = pelvis + Vector3.new(-6,-3, 4); rightFoot = pelvis + Vector3.new(6,-3,-2)
 
         elseif state==Enum.HumanoidStateType.Freefall or vel.Y < -2 then
-            headCenter = Vector3.new(0,16,0); neck=Vector3.new(0,12,0); pelvis=Vector3.new(0,1,0)
+            local pY = localGnd + 11
+            headCenter=Vector3.new(0,pY+15,0); neck=Vector3.new(0,pY+11,0); pelvis=Vector3.new(0,pY,0)
             leftHand  = neck + Vector3.new(-12,12,-2); rightHand = neck + Vector3.new(12,12,-2)
             leftFoot  = pelvis + Vector3.new(-5,-8,-2); rightFoot = pelvis + Vector3.new(5,-8,2)
 
         else
-            headCenter = Vector3.new(0,16,0); neck=Vector3.new(0,12,0); pelvis=Vector3.new(0,1,0)
+            local pY = localGnd + 11   -- pelvis is legLength above ground
+            headCenter=Vector3.new(0,pY+15,0); neck=Vector3.new(0,pY+11,0); pelvis=Vector3.new(0,pY,0)
             local cycleSpd = math.clamp(speed*0.8,4,12)
             local swing    = moving and math.sin(animT*cycleSpd)*0.8 or math.sin(animT*2)*0.05
             leftHand = neck + Vector3.new(
@@ -1532,7 +1526,7 @@ BtnStickman.MouseButton1Click:Connect(function()
             end
         end
 
-        Hum.CameraOffset = Vector3.new(0, 14, 0)
+        Hum.CameraOffset = Vector3.new(0, localGnd + 22, 0)
     end)
 end)
 
@@ -1587,7 +1581,7 @@ BtnBall.MouseButton1Click:Connect(function()
         -- Roll: sphere rolls in the direction of horizontal movement
         if speed > 0.3 then
             local ballR = 6.0
-            rollAngle   = rollAngle + (speed*dt)/ballR   -- arc-length / radius
+            rollAngle   = rollAngle - (speed*dt)/ballR   -- negated = rolls toward facing direction
             if horizVel.Magnitude > 0.01 then
                 -- Perpendicular axis to movement direction = roll axis
                 local moveDir = horizVel.Unit
@@ -1667,24 +1661,30 @@ BtnDoor.MouseButton1Click:Connect(function()
 
     -- Holographic preview block follows cursor
     local preview = Instance.new("Part")
+    -- Door: 4 wide, 8 tall, thin (faces toward player)
     preview.Name, preview.Anchored    = "DoorPreview", true
-    preview.CanCollide, preview.Transparency = false, 0.5
-    preview.Size                       = Vector3.new(0.5, 8, 4)
+    preview.CanCollide, preview.Transparency = false, 0.45
+    preview.Size                       = Vector3.new(4, 8, 0.3)  -- width, height, thickness
     preview.Color                      = Color3.fromRGB(80,140,255)
     preview.Material                   = Enum.Material.Neon
     preview.Parent                     = workspace
 
-    -- Snap to mouse hit position grid
+    -- Preview follows cursor, bottom on ground, faces player direction
     DoorPreviewConn = R.RenderStepped:Connect(function()
         if not DoorActive or not preview.Parent then
             DoorPreviewConn:Disconnect(); DoorPreviewConn = nil; return
         end
         local h   = M.Hit
+        -- Snap XZ position, use actual Y + lift so bottom of door is at ground
         local snp = Vector3.new(
-            math.round(h.Position.X/4)*4,
-            math.round(h.Position.Y/4)*4,
-            math.round(h.Position.Z/4)*4)
-        preview.CFrame = CFrame.new(snp)
+            math.round(h.Position.X),
+            h.Position.Y + 4,   -- lift by half height (8/2=4) so bottom = cursor
+            math.round(h.Position.Z))
+        -- Door faces perpendicular to player's look direction
+        local hrp = L.Character and L.Character:FindFirstChild("HumanoidRootPart")
+        local fwd = hrp and Vector3.new(hrp.CFrame.LookVector.X, 0, hrp.CFrame.LookVector.Z).Unit
+                         or Vector3.new(0,0,-1)
+        preview.CFrame = CFrame.lookAt(snp, snp + fwd)
     end)
 
     -- Click to place
@@ -1709,16 +1709,15 @@ BtnDoor.MouseButton1Click:Connect(function()
         DoorAngle        = 0
         DoorPlacedPart   = doorPart
 
-        doorPart.Size     = Vector3.new(0.5, 8, 4)
+        -- Door stands upright: 4 wide, 8 tall, thin
+        doorPart.Size       = Vector3.new(4, 8, 0.3)
         doorPart.CanCollide = true
-        doorPart.Color    = Color3.fromRGB(140,100,60)
-        doorPart.Material = Enum.Material.Wood
-        doorPart.CFrame   = placeCF
+        doorPart.Color      = Color3.fromRGB(140, 100, 60)
+        doorPart.Material   = Enum.Material.Wood
+        doorPart.CFrame     = placeCF  -- placeCF already has correct Y and orientation
 
-        -- Paint the door (server-side)
-        FirePaint(doorPart, Color3.fromRGB(140,100,60))
+        FirePaint(doorPart, Color3.fromRGB(140, 100, 60))
 
-        -- Cleanup preview
         pcall(function() preview:Destroy() end)
         if DoorPreviewConn then DoorPreviewConn:Disconnect(); DoorPreviewConn = nil end
         placeConn:Disconnect()
@@ -1726,53 +1725,52 @@ BtnDoor.MouseButton1Click:Connect(function()
         BtnDoor.Text = "Door Tool: OFF  (Door placed!)"
         BtnDoor.BackgroundColor3 = Color3.fromRGB(80,80,140)
 
-        -- Hinge pivot is the left edge of the door
-        local hingeOffset = Vector3.new(-2, 0, 0)   -- local door space
+        -- Hinge = left vertical edge of door in LOCAL door space
+        -- Door width is 4 in X, so left edge = X = -2
+        local hingeLocalOffset = Vector3.new(-2, 0, 0)
 
-        -- Drive loop: smooth angle, velocity-based (FE replicated)
-        local prevAngle   = 0
+        DoorAngle = 0
+        local prevAngle = 0
+
         DoorConn = R.RenderStepped:Connect(function(dt)
             if not doorPart or not doorPart.Parent then
                 DoorConn:Disconnect(); DoorConn = nil; return
             end
 
-            -- Proximity: open if any player within 8 studs
+            -- Open when any player is within 8 studs
             local anyNear = false
             for _, pl in ipairs(P:GetPlayers()) do
-                local plHrp = pl.Character
-                    and pl.Character:FindFirstChild("HumanoidRootPart")
-                if plHrp and (plHrp.Position-doorPart.Position).Magnitude < 8 then
+                local plHrp = pl.Character and pl.Character:FindFirstChild("HumanoidRootPart")
+                if plHrp and (plHrp.Position - doorPart.Position).Magnitude < 8 then
                     anyNear = true; break
                 end
             end
-
             local targetAngle = anyNear and (-math.pi/2) or 0
 
-            -- Smooth angle interpolation
-            local angleDiff = targetAngle - DoorAngle
-            DoorAngle = DoorAngle + angleDiff * math.min(dt*5, 1)
+            -- Smooth swing
+            DoorAngle = DoorAngle + (targetAngle - DoorAngle) * math.min(dt * 5, 1)
 
-            -- Build door CFrame: rotate around the hinge (left edge)
-            --   pivot world position = base + rotated hinge offset
-            local pivotWorldCF = placeCF * CFrame.new(hingeOffset)
-                                           * CFrame.Angles(0, DoorAngle, 0)
-            local doorCF = pivotWorldCF * CFrame.new(-hingeOffset)
-
-            -- Drive toward this CFrame using velocity
-            local tPos   = doorCF.Position
-            local curPos = doorPart.Position
-            local posErr = tPos - curPos
+            --[[
+                Hinge pivot math (correct door rotation):
+                  1. Transform hinge point to world space using ORIGINAL placeCF
+                  2. Rotate around the world Y-axis at that pivot by DoorAngle
+                  3. The door center = pivot + door's local (+X * 2) in the rotated frame
+                This keeps the hinge edge fixed and swings the door correctly.
+            --]]
+            local pivotWorld = placeCF * CFrame.new(hingeLocalOffset)
+            local swingCF    = pivotWorld * CFrame.Angles(0, DoorAngle, 0)
+            local doorCF     = swingCF   * CFrame.new(-hingeLocalOffset)
 
             doorPart.CanCollide = true
             doorPart.Anchored   = false
-            doorPart.AssemblyLinearVelocity =
-                posErr * 18 - doorPart.AssemblyLinearVelocity * 0.7
 
-            -- Rotation: angular velocity to match door swing
-            local angSpd = (DoorAngle - prevAngle) / dt
-            doorPart.AssemblyAngularVelocity =
-                Vector3.new(0, angSpd * 0.9, 0)
+            -- Move to doorCF using lerp (smooth, no snapping)
+            local alpha = math.min(dt * 12, 1)
+            doorPart.CFrame = doorPart.CFrame:Lerp(doorCF, alpha)
 
+            local angSpd = (DoorAngle - prevAngle) / math.max(dt, 0.001)
+            doorPart.AssemblyAngularVelocity = Vector3.new(0, angSpd * 0.8, 0)
+            doorPart.AssemblyLinearVelocity  = Vector3.new(0, 0.02, 0)
             prevAngle = DoorAngle
 
             pcall(function()
@@ -2153,6 +2151,238 @@ task.spawn(function()
                 and Color3.fromRGB(80,255,140) or Color3.fromRGB(255,200,80)
         end)
     end
+end)
+
+
+-- ============================================================
+-- [T] TITANIC ORBIT
+--     Blocks form a Titanic ship shape in FRONT of the player.
+--     CanCollide = true so players can walk/sit on it.
+--     Mini GUI: Direction track + Forward movement.
+-- ============================================================
+
+-- Titanic block offset table (ship faces -Z = forward, bow = -Z)
+local function BuildTitanicOffsets(total)
+    local o = {}
+    local n = 1
+    local function add(v) if n <= total then o[n]=v; n=n+1 end end
+
+    -- KEEL (spine along bottom)
+    for i=0,9 do add(Vector3.new(0,-5,-24+i*5)) end
+    -- HULL PORT (left side)
+    for i=0,7 do add(Vector3.new(-5,-2,-20+i*5)) end
+    -- HULL STARBOARD (right side)
+    for i=0,7 do add(Vector3.new( 5,-2,-20+i*5)) end
+    -- MAIN DECK top
+    for i=0,7 do add(Vector3.new(0, 0,-18+i*4)) end
+    -- BOW
+    add(Vector3.new(0,-1,-25)); add(Vector3.new(0,-3,-27)); add(Vector3.new(0,-4,-28))
+    add(Vector3.new(-2,-2,-26)); add(Vector3.new(2,-2,-26))
+    -- STERN
+    add(Vector3.new(0,-1,27)); add(Vector3.new(0,-3,28))
+    add(Vector3.new(-2,-3,27)); add(Vector3.new(2,-3,27))
+    -- SUPERSTRUCTURE center rows
+    for i=0,7 do add(Vector3.new(0,4,-10+i*3)) end
+    add(Vector3.new(-3,3,-5)); add(Vector3.new(3,3,-5))
+    add(Vector3.new(-3,3, 5)); add(Vector3.new(3,3, 5))
+    add(Vector3.new(-3,3,15)); add(Vector3.new(3,3,15))
+    -- Upper promenade
+    for i=0,4 do add(Vector3.new(0,7,-6+i*4)) end
+    -- 4 FUNNELS (3 blocks each, z: -8, 0, 8, 16)
+    for _,fz in ipairs({-8,0,8,16}) do
+        add(Vector3.new(0, 9,fz))
+        add(Vector3.new(0,14,fz))
+        add(Vector3.new(0,19,fz))
+    end
+    -- BRIDGE
+    add(Vector3.new( 0,7,-15)); add(Vector3.new(-2,8,-15))
+    add(Vector3.new( 2,8,-15)); add(Vector3.new( 0,10,-15))
+    -- FORWARD MAST
+    add(Vector3.new(0, 7,-23)); add(Vector3.new(0,13,-23))
+    add(Vector3.new(0,19,-23)); add(Vector3.new(0,25,-23))
+    -- AFT MAST
+    add(Vector3.new(0, 7,20)); add(Vector3.new(0,13,20)); add(Vector3.new(0,18,20))
+    -- LIFEBOATS (both sides)
+    for i=0,3 do
+        add(Vector3.new(-5,3,-5+i*4))
+        add(Vector3.new( 5,3,-5+i*4))
+    end
+    -- PROPELLERS
+    add(Vector3.new(0,-6,25)); add(Vector3.new(-3,-5,25)); add(Vector3.new(3,-5,25))
+    -- Hull fill for remaining blocks
+    while n<=total do
+        local t=((n-1)%30)/30; local z=-22+t*44
+        local row=math.floor((n-1)/30)
+        local x=((row%3)-1)*3; local y=(row%3)-3
+        o[n]=Vector3.new(x,y,z); n=n+1
+    end
+    return o
+end
+
+-- Titanic GUI
+local TitanicPanel = Instance.new("Frame", S)
+TitanicPanel.Name             = "TitanicPanel"
+TitanicPanel.Size             = UDim2.new(0,155,0,110)
+TitanicPanel.Position         = UDim2.new(0,228,0,220)
+TitanicPanel.BackgroundColor3 = Color3.fromRGB(18,22,34)
+TitanicPanel.BorderSizePixel  = 0
+TitanicPanel.Visible          = false
+TitanicPanel.Active           = true
+TitanicPanel.Draggable        = true
+Instance.new("UICorner", TitanicPanel).CornerRadius = UDim.new(0,8)
+local tpStroke = Instance.new("UIStroke", TitanicPanel)
+tpStroke.Color, tpStroke.Thickness = Color3.fromRGB(60,100,180), 1.3
+
+local TPTitle = Instance.new("TextLabel", TitanicPanel)
+TPTitle.Size               = UDim2.new(1,0,0,24)
+TPTitle.BackgroundColor3   = Color3.fromRGB(28,38,60)
+TPTitle.BorderSizePixel    = 0
+TPTitle.TextColor3         = Color3.fromRGB(180,210,255)
+TPTitle.TextSize, TPTitle.Font = 9, Enum.Font.GothamBold
+TPTitle.Text               = "TITANIC"
+Instance.new("UICorner", TPTitle).CornerRadius = UDim.new(0,8)
+
+local TPList = Instance.new("Frame", TitanicPanel)
+TPList.Size, TPList.Position, TPList.BackgroundTransparency =
+    UDim2.new(1,-10,1,-32), UDim2.new(0,5,0,28), 1
+local tpLayout = Instance.new("UIListLayout", TPList)
+tpLayout.Padding, tpLayout.SortOrder = UDim.new(0,5), Enum.SortOrder.LayoutOrder
+
+local function TBTN(txt, col)
+    local b = Instance.new("TextButton", TPList)
+    b.Size, b.BackgroundColor3 = UDim2.new(1,0,0,24), col
+    b.TextColor3, b.TextSize, b.Font = Color3.new(1,1,1), 9, Enum.Font.GothamMedium
+    b.Text = txt
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0,4)
+    return b
+end
+
+local BtnTitanicDir = TBTN("Direction Track: OFF", Color3.fromRGB(50,70,130))
+local BtnTitanicFwd = TBTN(">> Forward (Hold)",    Color3.fromRGB(35,120,60))
+local BtnTitanicStop= TBTN("Anchor Ship",          Color3.fromRGB(110,40,40))
+
+-- Titanic state
+local TitanicDirOn    = false
+local TitanicFwdOn    = false
+local TitanicSpd      = 18        -- studs per second
+local titanicCF       = CFrame.new(0,0,0)
+local titanicOffsets  = {}
+local TitanicAnchored = false     -- when true the ship stops even if Forward held
+
+BtnTitanicDir.MouseButton1Click:Connect(function()
+    TitanicDirOn = not TitanicDirOn
+    BtnTitanicDir.Text = TitanicDirOn and "Direction Track: ON" or "Direction Track: OFF"
+    BtnTitanicDir.BackgroundColor3 = TitanicDirOn
+        and Color3.fromRGB(40,160,80) or Color3.fromRGB(50,70,130)
+end)
+
+BtnTitanicFwd.MouseButton1Click:Connect(function()
+    TitanicFwdOn    = not TitanicFwdOn
+    TitanicAnchored = false
+    BtnTitanicFwd.Text = TitanicFwdOn and "|| Pause Forward" or ">> Forward (Hold)"
+    BtnTitanicFwd.BackgroundColor3 = TitanicFwdOn
+        and Color3.fromRGB(200,130,30) or Color3.fromRGB(35,120,60)
+end)
+
+BtnTitanicStop.MouseButton1Click:Connect(function()
+    TitanicAnchored = true
+    TitanicFwdOn    = false
+    BtnTitanicFwd.Text = ">> Forward (Hold)"
+    BtnTitanicFwd.BackgroundColor3 = Color3.fromRGB(35,120,60)
+    BtnTitanicStop.Text = "Anchored"
+    BtnTitanicStop.BackgroundColor3 = Color3.fromRGB(160,50,50)
+    task.delay(0.8, function()
+        BtnTitanicStop.Text = "Anchor Ship"
+        BtnTitanicStop.BackgroundColor3 = Color3.fromRGB(110,40,40)
+        TitanicAnchored = false
+    end)
+end)
+
+-- Hide panel when mode changes
+local oldSwitch = SWITCH_MODE
+SWITCH_MODE = function(name)
+    oldSwitch(name)
+    TitanicPanel.Visible = (name == "Titanic")
+    if name ~= "Titanic" then
+        TitanicDirOn, TitanicFwdOn = false, false
+    end
+end
+
+-- Button added to main scrolling frame
+local BtnTitanic = BTN("Titanic Ship Orbit", Color3.fromRGB(25,60,130))
+
+BtnTitanic.MouseButton1Click:Connect(function()
+    SWITCH_MODE("Titanic")
+    RefreshCP()
+    if #CP == 0 then return end
+
+    -- Compute ship offsets scaled to block count
+    titanicOffsets = BuildTitanicOffsets(#CP)
+    TitanicDirOn, TitanicFwdOn = false, false
+
+    -- Spawn Titanic in front of the player (not on them)
+    local Root = L.Character and L.Character:FindFirstChild("HumanoidRootPart")
+    if not Root then return end
+    local lv    = Root.CFrame.LookVector
+    local yaw   = math.atan2(lv.X, lv.Z)
+    -- Place center of ship 40 studs in front, slightly below eye level
+    local spawn = Root.Position + Vector3.new(lv.X,0,lv.Z).Unit * 40 + Vector3.new(0,-4,0)
+    titanicCF   = CFrame.new(spawn) * CFrame.Angles(0, yaw, 0)
+
+    TitanicPanel.Visible = true
+
+    AC = R.RenderStepped:Connect(function(dt)
+        if not OrbitActive then return end
+        local C     = L.Character
+        local Root2 = C and C:FindFirstChild("HumanoidRootPart")
+        if not Root2 then return end
+
+        -- Direction tracking: rotate ship to face player's look direction
+        if TitanicDirOn then
+            local lv2   = Root2.CFrame.LookVector
+            local newYaw = math.atan2(lv2.X, lv2.Z)
+            titanicCF   = CFrame.new(titanicCF.Position) * CFrame.Angles(0, newYaw, 0)
+        end
+
+        -- Forward movement: advance along ship's own facing direction
+        if TitanicFwdOn and not TitanicAnchored then
+            local shipFwd = titanicCF.LookVector
+            local curYaw  = math.atan2(titanicCF.LookVector.X, titanicCF.LookVector.Z)
+            titanicCF = CFrame.new(titanicCF.Position + shipFwd * TitanicSpd * dt)
+                      * CFrame.Angles(0, curYaw, 0)
+        end
+
+        local total = #CP
+        if total == 0 then return end
+        if #titanicOffsets ~= total then
+            titanicOffsets = BuildTitanicOffsets(total)
+        end
+
+        -- Drive each block toward its Titanic position
+        -- CanCollide = true so players can walk/sit on the ship
+        for i, prt in ipairs(CP) do
+            if prt and prt.Parent then
+                prt.CanCollide = true   -- rideable: players can stand on deck
+                prt.Anchored   = false
+                prt.AssemblyAngularVelocity = Vector3.zero
+                prt.AssemblyLinearVelocity  = Vector3.new(0, 0.04, 0)
+                pcall(function()
+                    if sethiddenproperty then
+                        sethiddenproperty(prt, "NetworkIsSleeping", false)
+                    end
+                end)
+                local off    = titanicOffsets[i] or Vector3.zero
+                local tCF    = titanicCF * CFrame.new(off)
+                local alpha  = math.clamp(BlockSpeed / 400, 0.05, 0.18)
+                prt.CFrame   = prt.CFrame:Lerp(tCF, alpha)
+                -- Pull back if fallen
+                local r2 = L.Character and L.Character:FindFirstChild("HumanoidRootPart")
+                if r2 and (prt.Position - titanicCF.Position).Magnitude > 180 then
+                    prt.CFrame = titanicCF * CFrame.new(off)
+                end
+            end
+        end
+    end)
 end)
 
 print("[B.R.I.C.K.S v2] Loaded - created by Sofi")
