@@ -196,6 +196,8 @@ local function VLD(o)
     if o.Name == "Handle" and o.Parent and o.Parent:IsA("Accessory") then
         return false
     end
+    -- Exclude placed door so orbits do not re-claim it (prevents door jitter)
+    if DoorPlacedPart and o == DoorPlacedPart then return false end
     return true
 end
 
@@ -978,7 +980,9 @@ R.Stepped:Connect(function()
     end
     for _, part in ipairs(CP) do
         if part and part.Parent and not part.Anchored then
-            part.CanCollide = false
+            if CurrentMode ~= "Titanic" then
+                part.CanCollide = false  -- Titanic keeps CanCollide=true for riding
+            end
             pcall(function()
                 if sethiddenproperty then
                     sethiddenproperty(part, "NetworkIsSleeping", false)
@@ -1687,15 +1691,20 @@ BtnDoor.MouseButton1Click:Connect(function()
         preview.CFrame = CFrame.lookAt(snp, snp + fwd)
     end)
 
-    -- Click to place
+    -- Place door only on genuine TAP (TouchTap on mobile avoids false swipe triggers)
     local placeConn
-    placeConn = M.Button1Down:Connect(function()
-        if not DoorActive then placeConn:Disconnect(); return end
+    local doorPlaceFn  -- forward decl
+    doorPlaceFn = function()
+        if not DoorActive then
+            if placeConn then placeConn:Disconnect(); placeConn = nil end
+            return
+        end
 
         -- Pop the first claimed block as the door
         local doorPart = CP[1]
         if not doorPart or not doorPart.Parent then
-            placeConn:Disconnect(); CleanupDoor(); return
+            if placeConn then placeConn:Disconnect(); placeConn = nil end
+            CleanupDoor(); return
         end
         -- Remove from pool
         local newCP = {}
@@ -1720,7 +1729,7 @@ BtnDoor.MouseButton1Click:Connect(function()
 
         pcall(function() preview:Destroy() end)
         if DoorPreviewConn then DoorPreviewConn:Disconnect(); DoorPreviewConn = nil end
-        placeConn:Disconnect()
+        if placeConn then placeConn:Disconnect(); placeConn = nil end
         DoorActive = false
         BtnDoor.Text = "Door Tool: OFF  (Door placed!)"
         BtnDoor.BackgroundColor3 = Color3.fromRGB(80,80,140)
@@ -1779,7 +1788,18 @@ BtnDoor.MouseButton1Click:Connect(function()
                 end
             end)
         end)
-    end)
+    end  -- doorPlaceFn
+    -- Wire to TouchTap on mobile (no swipe false-positives) or Mouse on desktop
+    if UIS.TouchEnabled then
+        placeConn = UIS.TouchTap:Connect(function(positions, gpe)
+            if gpe or not DoorActive then return end
+            doorPlaceFn()
+        end)
+    else
+        placeConn = M.Button1Down:Connect(function()
+            doorPlaceFn()
+        end)
+    end
 end)
 
 -- ============================================================
@@ -2323,11 +2343,12 @@ BtnTitanic.MouseButton1Click:Connect(function()
     -- Spawn Titanic in front of the player (not on them)
     local Root = L.Character and L.Character:FindFirstChild("HumanoidRootPart")
     if not Root then return end
-    local lv    = Root.CFrame.LookVector
-    local yaw   = math.atan2(lv.X, lv.Z)
-    -- Place center of ship 40 studs in front, slightly below eye level
-    local spawn = Root.Position + Vector3.new(lv.X,0,lv.Z).Unit * 40 + Vector3.new(0,-4,0)
-    titanicCF   = CFrame.new(spawn) * CFrame.Angles(0, yaw, 0)
+    local lv    = Vector3.new(Root.CFrame.LookVector.X, 0, Root.CFrame.LookVector.Z)
+    if lv.Magnitude < 0.01 then lv = Vector3.new(0,0,1) else lv = lv.Unit end
+    -- Place ship 45 studs ahead so player stands at the stern, not inside
+    local spawn = Root.Position + lv * 45 + Vector3.new(0,-3,0)
+    -- CFrame.lookAt makes LookVector = lv (ship faces exact same direction as player)
+    titanicCF   = CFrame.lookAt(spawn, spawn + lv)
 
     TitanicPanel.Visible = true
 
@@ -2339,17 +2360,40 @@ BtnTitanic.MouseButton1Click:Connect(function()
 
         -- Direction tracking: rotate ship to face player's look direction
         if TitanicDirOn then
-            local lv2   = Root2.CFrame.LookVector
-            local newYaw = math.atan2(lv2.X, lv2.Z)
-            titanicCF   = CFrame.new(titanicCF.Position) * CFrame.Angles(0, newYaw, 0)
+            local lv2    = Root2.CFrame.LookVector
+            local flatLv = Vector3.new(lv2.X, 0, lv2.Z)
+            if flatLv.Magnitude > 0.01 then
+                titanicCF = CFrame.lookAt(titanicCF.Position,
+                    titanicCF.Position + flatLv.Unit)
+            end
         end
 
-        -- Forward movement: advance along ship's own facing direction
+        -- Forward movement: CFrame + Vector3 preserves rotation perfectly
         if TitanicFwdOn and not TitanicAnchored then
-            local shipFwd = titanicCF.LookVector
-            local curYaw  = math.atan2(titanicCF.LookVector.X, titanicCF.LookVector.Z)
-            titanicCF = CFrame.new(titanicCF.Position + shipFwd * TitanicSpd * dt)
-                      * CFrame.Angles(0, curYaw, 0)
+            titanicCF = titanicCF + titanicCF.LookVector * TitanicSpd * dt
+        end
+
+        -- Ground collision: keep keel above terrain / anchored surfaces
+        do
+            local grp = RaycastParams.new()
+            pcall(function() grp.FilterType = Enum.RaycastFilterType.Exclude end)
+            local gfl = {}
+            for _, gp in ipairs(CP) do table.insert(gfl, gp) end
+            local gc = L.Character
+            if gc then table.insert(gfl, gc) end
+            pcall(function() grp.FilterDescendantsInstances = gfl end)
+            local gRes = workspace:Raycast(
+                titanicCF.Position + Vector3.new(0,25,0),
+                Vector3.new(0,-80,0), grp)
+            if gRes then
+                local gY    = gRes.Position.Y
+                -- Keel (bottom of hull) is at local Y = -5
+                local keelY = (titanicCF * CFrame.new(0,-5,0)).Position.Y
+                local lift  = (gY + 2) - keelY
+                if lift > 0 then
+                    titanicCF = titanicCF + Vector3.new(0, lift, 0)
+                end
+            end
         end
 
         local total = #CP
@@ -2386,3 +2430,412 @@ BtnTitanic.MouseButton1Click:Connect(function()
 end)
 
 print("[B.R.I.C.K.S v2] Loaded - created by Sofi")
+
+-- ============================================================
+-- [SB] SAVE BUILD + WALK MODE
+-- ============================================================
+
+-- ?? Serialization helpers (Agarware-compatible format) ?????
+local SB_MatSym = {
+    [Enum.Material.SmoothPlastic]="!", [Enum.Material.Plastic]="@",
+    [Enum.Material.Brick]="$",         [Enum.Material.WoodPlanks]="%",
+    [Enum.Material.Ice]="^",           [Enum.Material.Grass]="&",
+    [Enum.Material.Sand]="*",          [Enum.Material.Snow]="(",
+    [Enum.Material.Glass]=")",         [Enum.Material.Wood]="-",
+    [Enum.Material.Slate]="_",         [Enum.Material.Neon]="?",
+    [Enum.Material.Metal]="{",         [Enum.Material.Concrete]="~",
+    [Enum.Material.DiamondPlate]="]",  [Enum.Material.Granite]="[",
+    [Enum.Material.Marble]="+",        [Enum.Material.Pebble]="=",
+}
+local SB_SymMat = {}
+for m,s in pairs(SB_MatSym) do SB_SymMat[s]=m end
+
+local function SB_ColorHex(c)
+    return string.format("%02X%02X%02X",
+        math.floor(c.R*255), math.floor(c.G*255), math.floor(c.B*255))
+end
+local function SB_HexColor(h)
+    return Color3.fromRGB(
+        tonumber(h:sub(1,2),16) or 0,
+        tonumber(h:sub(3,4),16) or 0,
+        tonumber(h:sub(5,6),16) or 0)
+end
+
+local function SB_Serialize(parts)
+    local s = ""
+    for _, p in ipairs(parts) do
+        if p and p.Parent then
+            local mat = SB_MatSym[p.Material] or "!"
+            local col = SB_ColorHex(p.Color)
+            local sz  = p.Size
+            local cf  = p.CFrame
+            s = s .. string.format("|%s%s%.0f,%.0f,%.0f.%.3f,%.3f,%.3f|",
+                col, mat, sz.X, sz.Y, sz.Z, cf.X, cf.Y, cf.Z)
+        end
+    end
+    return s
+end
+
+local function SB_Parse(str)
+    local blocks = {}
+    for entry in str:gmatch("|([^|]+)|") do
+        local col6 = entry:match("^(%x%x%x%x%x%x)")
+        if col6 then
+            local rest = entry:sub(7)
+            local mat  = rest:sub(1,1)
+            local nums = rest:sub(2)
+            local sx,sy,sz,px,py,pz = nums:match(
+                "^([%d%.]+),([%d%.]+),([%d%.]+)%.([%-%.%d]+),([%-%.%d]+),([%-%.%d]+)")
+            if sx then
+                table.insert(blocks,{
+                    color    = SB_HexColor(col6),
+                    material = SB_SymMat[mat] or Enum.Material.SmoothPlastic,
+                    size     = Vector3.new(tonumber(sx),tonumber(sy),tonumber(sz)),
+                    position = Vector3.new(tonumber(px),tonumber(py),tonumber(pz)),
+                })
+            end
+        end
+    end
+    return blocks
+end
+
+-- ?? State ??????????????????????????????????????????????????
+local SB_SelectOn  = false
+local SB_Selected  = {}           -- part -> true
+local SB_Highlights= {}           -- part -> SelectionBox
+local SB_Data      = {}           -- saved block data {cf,size,color,material,relCF,part}
+local SB_Center    = Vector3.zero
+local SB_Ghosts    = {}           -- holographic preview parts
+local SB_BuildStr  = ""           -- last serialized string
+
+local WalkOn       = false
+local WalkParts    = {}           -- {part, relCF}
+local WalkConn     = nil
+
+-- ?? Ghost helpers ???????????????????????????????????????????
+local function SB_ClearGhosts()
+    for _, g in ipairs(SB_Ghosts) do
+        if g and g.Parent then pcall(function() g:Destroy() end) end
+    end
+    SB_Ghosts = {}
+end
+
+local function SB_ShowGhosts()
+    SB_ClearGhosts()
+    for _, bd in ipairs(SB_Data) do
+        local g = Instance.new("Part")
+        g.Anchored, g.CanCollide = true, false
+        g.Size, g.CFrame         = bd.size, bd.cf
+        g.Color, g.Material      = bd.color, Enum.Material.Neon
+        g.Transparency           = 0.52
+        g.Parent                 = workspace
+        local sb = Instance.new("SelectionBox", g)
+        sb.Adornee, sb.Color3    = g, Color3.fromRGB(0,190,255)
+        sb.LineThickness, sb.SurfaceTransparency = 0.04, 1
+        table.insert(SB_Ghosts, g)
+    end
+end
+
+-- ?? Save Build GUI ??????????????????????????????????????????
+local SBPanel = Instance.new("Frame", S)
+SBPanel.Name             = "SaveBuildPanel"
+SBPanel.Size             = UDim2.new(0,215,0,210)
+SBPanel.Position         = UDim2.new(0,230,0,40)
+SBPanel.BackgroundColor3 = Color3.fromRGB(14,18,26)
+SBPanel.BorderSizePixel  = 0
+SBPanel.Active           = true
+SBPanel.Draggable        = true
+SBPanel.Visible          = false
+Instance.new("UICorner", SBPanel).CornerRadius = UDim.new(0,8)
+local sbSt = Instance.new("UIStroke", SBPanel)
+sbSt.Color, sbSt.Thickness = Color3.fromRGB(0,175,220), 1.3
+
+local SBHdr = Instance.new("Frame", SBPanel)
+SBHdr.Size, SBHdr.BackgroundColor3, SBHdr.BorderSizePixel =
+    UDim2.new(1,0,0,26), Color3.fromRGB(12,32,52), 0
+Instance.new("UICorner", SBHdr).CornerRadius = UDim.new(0,8)
+local SBTitle = Instance.new("TextLabel", SBHdr)
+SBTitle.Size, SBTitle.Position, SBTitle.BackgroundTransparency =
+    UDim2.new(1,-30,1,0), UDim2.new(0,8,0,0), 1
+SBTitle.TextColor3, SBTitle.TextSize, SBTitle.Font, SBTitle.TextXAlignment =
+    Color3.fromRGB(90,215,255), 10, Enum.Font.GothamBold, Enum.TextXAlignment.Left
+SBTitle.Text = "Save Build"
+local SBX = Instance.new("TextButton", SBHdr)
+SBX.Size, SBX.Position = UDim2.new(0,22,0,22), UDim2.new(1,-25,0,2)
+SBX.BackgroundColor3, SBX.TextColor3, SBX.Text = Color3.fromRGB(200,45,45), Color3.new(1,1,1), "X"
+SBX.TextSize, SBX.Font, SBX.BorderSizePixel = 10, Enum.Font.GothamBold, 0
+Instance.new("UICorner", SBX).CornerRadius = UDim.new(0,4)
+SBX.MouseButton1Click:Connect(function() SBPanel.Visible = false end)
+
+local SBList = Instance.new("Frame", SBPanel)
+SBList.Size, SBList.Position, SBList.BackgroundTransparency =
+    UDim2.new(1,-10,1,-34), UDim2.new(0,5,0,30), 1
+local sbLayout = Instance.new("UIListLayout", SBList)
+sbLayout.Padding, sbLayout.SortOrder = UDim.new(0,4), Enum.SortOrder.LayoutOrder
+
+local function SBBTN(txt, col)
+    local b = Instance.new("TextButton", SBList)
+    b.Size, b.BackgroundColor3, b.BorderSizePixel = UDim2.new(1,0,0,25), col, 0
+    b.TextColor3, b.TextSize, b.Font = Color3.new(1,1,1), 9, Enum.Font.GothamMedium
+    b.Text = txt
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0,4)
+    return b
+end
+local function SBLbl(txt, col)
+    local l = Instance.new("TextLabel", SBList)
+    l.Size, l.BackgroundTransparency, l.BorderSizePixel = UDim2.new(1,0,0,17), 1, 0
+    l.TextColor3, l.TextSize, l.Font = col or Color3.fromRGB(150,195,235), 8.5, Enum.Font.GothamMedium
+    l.TextXAlignment, l.TextWrapped, l.Text = Enum.TextXAlignment.Left, true, txt
+    return l
+end
+
+local BtnSBSelect = SBBTN("Select Blocks: OFF",       Color3.fromRGB(35,55,95))
+local SBCountLbl  = SBLbl("Selected: 0 blocks",       Color3.fromRGB(120,185,255))
+local BtnSBSave   = SBBTN("Save Selected",             Color3.fromRGB(28,120,72))
+local BtnSBImport = SBBTN("Show Hologram",             Color3.fromRGB(130,85,18))
+local BtnSBWalk   = SBBTN("Walk Mode: OFF",            Color3.fromRGB(75,25,110))
+local BtnSBClear  = SBBTN("Clear All",                 Color3.fromRGB(95,25,25))
+local SBStatusLbl = SBLbl("No build saved",            Color3.fromRGB(100,150,200))
+
+-- Button in main panel to open/close this GUI
+local BtnSaveBuild = BTN("Save Build",  Color3.fromRGB(14,72,108))
+BtnSaveBuild.MouseButton1Click:Connect(function()
+    SBPanel.Visible = not SBPanel.Visible
+end)
+
+-- ?? Selection system ????????????????????????????????????????
+local function SB_UpdateCount()
+    local n = 0
+    for _ in pairs(SB_Selected) do n = n + 1 end
+    SBCountLbl.Text = "Selected: " .. n .. " blocks"
+end
+
+local function SB_Toggle(part)
+    if not part or not part:IsA("BasePart") then return end
+    if SB_Selected[part] then
+        SB_Selected[part] = nil
+        local hl = SB_Highlights[part]
+        if hl then pcall(function() hl:Destroy() end) end
+        SB_Highlights[part] = nil
+    else
+        SB_Selected[part] = true
+        local sb = Instance.new("SelectionBox", workspace)
+        sb.Adornee, sb.Color3 = part, Color3.fromRGB(0,255,110)
+        sb.LineThickness, sb.SurfaceTransparency = 0.05, 0.8
+        SB_Highlights[part] = sb
+    end
+    SB_UpdateCount()
+end
+
+BtnSBSelect.MouseButton1Click:Connect(function()
+    SB_SelectOn = not SB_SelectOn
+    BtnSBSelect.Text = SB_SelectOn and "Select Blocks: ON (tap any block)" or "Select Blocks: OFF"
+    BtnSBSelect.BackgroundColor3 = SB_SelectOn
+        and Color3.fromRGB(35,155,70) or Color3.fromRGB(35,55,95)
+end)
+
+UIS.InputBegan:Connect(function(input, gpe)
+    if gpe or not SB_SelectOn then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        if M.Target then SB_Toggle(M.Target) end
+    end
+end)
+UIS.TouchTap:Connect(function(positions, gpe)
+    if gpe or not SB_SelectOn then return end
+    if #positions > 0 then
+        local ray = Cam:ScreenPointToRay(positions[1].X, positions[1].Y)
+        local rp  = RaycastParams.new()
+        local ch  = L.Character
+        pcall(function() rp.FilterType = Enum.RaycastFilterType.Exclude end)
+        pcall(function() rp.FilterDescendantsInstances = ch and {ch} or {} end)
+        local res = workspace:Raycast(ray.Origin, ray.Direction*300, rp)
+        if res and res.Instance then SB_Toggle(res.Instance) end
+    end
+end)
+
+-- ?? Save ????????????????????????????????????????????????????
+BtnSBSave.MouseButton1Click:Connect(function()
+    local parts = {}
+    for part in pairs(SB_Selected) do
+        if part and part.Parent then table.insert(parts, part) end
+    end
+    if #parts == 0 then SBStatusLbl.Text = "Nothing selected!"; return end
+
+    -- Compute center
+    local sum = Vector3.zero
+    for _, p in ipairs(parts) do sum = sum + p.Position end
+    SB_Center = sum / #parts
+
+    -- Store block data
+    SB_Data = {}
+    local centerCF = CFrame.new(SB_Center)
+    for _, p in ipairs(parts) do
+        table.insert(SB_Data, {
+            cf       = p.CFrame,
+            size     = p.Size,
+            color    = p.Color,
+            material = p.Material,
+            canColl  = p.CanCollide,
+            -- relative CFrame from group center (preserves shape when following player)
+            relCF    = centerCF:ToObjectSpace(p.CFrame),
+            part     = p,
+        })
+    end
+
+    -- Also serialize for reference
+    SB_BuildStr = SB_Serialize(parts)
+
+    SBStatusLbl.Text, SBStatusLbl.TextColor3 =
+        "Saved " .. #SB_Data .. " blocks", Color3.fromRGB(70,240,110)
+end)
+
+-- ?? Import hologram ?????????????????????????????????????????
+BtnSBImport.MouseButton1Click:Connect(function()
+    if #SB_Ghosts > 0 then
+        SB_ClearGhosts()
+        BtnSBImport.Text = "Show Hologram"
+        SBStatusLbl.Text, SBStatusLbl.TextColor3 =
+            "Ghosts cleared", Color3.fromRGB(150,195,235)
+        return
+    end
+    if #SB_Data == 0 then SBStatusLbl.Text = "Save a build first!"; return end
+    SB_ShowGhosts()
+    BtnSBImport.Text = "Hide Hologram"
+    SBStatusLbl.Text, SBStatusLbl.TextColor3 =
+        "Showing " .. #SB_Ghosts .. " ghost blocks", Color3.fromRGB(90,205,255)
+end)
+
+-- ?? Walk Mode ????????????????????????????????????????????????
+-- Unanchors saved blocks via stealth paint tool, then drives them
+-- to follow the player in the exact same relative formation.
+-- Toggling off re-anchors them at their new positions.
+
+local function SB_StealthSetAnchor(part, shouldAnchor)
+    pcall(function() part.Anchored = shouldAnchor end)
+    if not shouldAnchor then ClaimPart(part) end
+    -- Fire anchor-change remotes through the stealth paint tool
+    local tool = GetPaintTool()
+    if not tool then return end
+    for _, child in ipairs(tool:GetDescendants()) do
+        if child:IsA("RemoteEvent") then
+            pcall(function() child:FireServer(part, "Anchor", shouldAnchor) end)
+            pcall(function() child:FireServer(part, shouldAnchor) end)
+            pcall(function() child:FireServer(part, "anchored", shouldAnchor) end)
+            pcall(function() child:FireServer(part, "setanchor", shouldAnchor) end)
+        end
+    end
+end
+
+-- Locate the actual workspace part nearest a saved position
+local function SB_FindPartNear(savedCF, radius)
+    radius = radius or 1.5
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("BasePart")
+        and not obj:IsDescendantOf(L.Character or game)
+        and (obj.Position - savedCF.Position).Magnitude < radius then
+            return obj
+        end
+    end
+    return nil
+end
+
+BtnSBWalk.MouseButton1Click:Connect(function()
+    WalkOn = not WalkOn
+
+    if WalkOn then
+        if #SB_Data == 0 then
+            WalkOn = false
+            SBStatusLbl.Text = "Save a build first!"
+            return
+        end
+
+        BtnSBWalk.Text = "Walk Mode: ON  (tap to stop)"
+        BtnSBWalk.BackgroundColor3 = Color3.fromRGB(155,45,200)
+
+        local root = L.Character and L.Character:FindFirstChild("HumanoidRootPart")
+        local playerCF = root and root.CFrame or CFrame.new()
+
+        WalkParts = {}
+        local found = 0
+        for _, bd in ipairs(SB_Data) do
+            -- Resolve the actual part: use saved reference or find nearby
+            local part = (bd.part and bd.part.Parent) and bd.part
+                      or SB_FindPartNear(bd.cf)
+            if part and part.Parent then
+                -- Silently unanchor via paint tool
+                StealthEquip()           -- equip without showing
+                SB_StealthSetAnchor(part, false)
+                -- Compute offset relative to the player's current CFrame
+                table.insert(WalkParts, {
+                    part  = part,
+                    -- relCF from playerCF so the build follows the player
+                    relCF = playerCF:ToObjectSpace(part.CFrame),
+                })
+                found = found + 1
+            end
+        end
+
+        if found == 0 then
+            WalkOn = false
+            BtnSBWalk.Text = "Walk Mode: OFF"
+            BtnSBWalk.BackgroundColor3 = Color3.fromRGB(75,25,110)
+            SBStatusLbl.Text = "No blocks found at saved positions"
+            return
+        end
+        SBStatusLbl.Text, SBStatusLbl.TextColor3 =
+            "Walking " .. found .. " blocks", Color3.fromRGB(190,100,255)
+
+        if WalkConn then WalkConn:Disconnect() end
+        WalkConn = R.RenderStepped:Connect(function(dt)
+            if not WalkOn then
+                if WalkConn then WalkConn:Disconnect(); WalkConn = nil end
+                return
+            end
+            local C3   = L.Character
+            local Root3 = C3 and C3:FindFirstChild("HumanoidRootPart")
+            if not Root3 then return end
+            local baseCF = Root3.CFrame
+            for _, wp in ipairs(WalkParts) do
+                local prt = wp.part
+                if prt and prt.Parent then
+                    -- Apply the stored relative CFrame to the player's current CFrame
+                    -- This keeps the entire build formation rigid around the player
+                    local targetCF = baseCF * wp.relCF
+                    DrivePartFE(prt, targetCF, dt)
+                end
+            end
+        end)
+
+    else
+        -- Turn off: re-anchor blocks at their current positions
+        BtnSBWalk.Text = "Walk Mode: OFF"
+        BtnSBWalk.BackgroundColor3 = Color3.fromRGB(75,25,110)
+        if WalkConn then WalkConn:Disconnect(); WalkConn = nil end
+        for _, wp in ipairs(WalkParts) do
+            local prt = wp.part
+            if prt and prt.Parent then
+                task.delay(0.15, function()
+                    SB_StealthSetAnchor(prt, true)
+                end)
+            end
+        end
+        WalkParts = {}
+        SBStatusLbl.Text, SBStatusLbl.TextColor3 =
+            "Anchored at new positions", Color3.fromRGB(70,240,110)
+    end
+end)
+
+-- ?? Clear all ???????????????????????????????????????????????
+BtnSBClear.MouseButton1Click:Connect(function()
+    -- Remove selection highlights
+    for _, hl in pairs(SB_Highlights) do
+        if hl then pcall(function() hl:Destroy() end) end
+    end
+    SB_Selected, SB_Highlights = {}, {}
+    SB_ClearGhosts()
+    SB_Data = {}
+    SB_BuildStr = ""
+    SBCountLbl.Text  = "Selected: 0 blocks"
+    SBStatusLbl.Text, SBStatusLbl.TextColor3 = "Cleared",  Color3.fromRGB(150,195,235)
+    BtnSBImport.Text = "Show Hologram"
+end)
