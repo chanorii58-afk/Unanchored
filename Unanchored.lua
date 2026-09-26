@@ -32,6 +32,13 @@ local Cam = workspace.CurrentCamera
 
 -- Claimed parts pool
 local CP = {}
+-- Extra panels that hide when mode changes (populated by each mode's setup)
+local ModePanels    = {}  -- {panelFrame, modeName}
+-- Forward declarations so SWITCH_MODE can reset them before Titanic section runs
+local TitanicDirOn  = false
+local TitanicFwdOn  = false
+local TitanicAnchored = false
+local TitanicSpd    = 18
 
 -- Active connections
 local AC               = nil   -- current orbit RenderStepped
@@ -935,6 +942,17 @@ local function SWITCH_MODE(name)
     else
         AnimPanel.Visible = false
         SBFrame.Visible, ShFrame.Visible = false, false
+    end
+    -- Hide / show any extra registered mode panels (e.g. Titanic)
+    for _, mp in ipairs(ModePanels) do
+        if mp[1] and mp[1].Parent then
+            mp[1].Visible = (name == mp[2])
+        end
+    end
+    -- Reset mode-specific state when leaving that mode
+    if name ~= "Titanic" then
+        TitanicDirOn  = false
+        TitanicFwdOn  = false
     end
 
     -- Reset camera POV cleanly
@@ -2249,6 +2267,7 @@ TitanicPanel.BorderSizePixel  = 0
 TitanicPanel.Visible          = false
 TitanicPanel.Active           = true
 TitanicPanel.Draggable        = true
+table.insert(ModePanels, {TitanicPanel, "Titanic"})  -- auto-shown by SWITCH_MODE
 Instance.new("UICorner", TitanicPanel).CornerRadius = UDim.new(0,8)
 local tpStroke = Instance.new("UIStroke", TitanicPanel)
 tpStroke.Color, tpStroke.Thickness = Color3.fromRGB(60,100,180), 1.3
@@ -2281,13 +2300,9 @@ local BtnTitanicDir = TBTN("Direction Track: OFF", Color3.fromRGB(50,70,130))
 local BtnTitanicFwd = TBTN(">> Forward (Hold)",    Color3.fromRGB(35,120,60))
 local BtnTitanicStop= TBTN("Anchor Ship",          Color3.fromRGB(110,40,40))
 
--- Titanic state
-local TitanicDirOn    = false
-local TitanicFwdOn    = false
-local TitanicSpd      = 18        -- studs per second
+-- Titanic state (flags declared at top for SWITCH_MODE access)
 local titanicCF       = CFrame.new(0,0,0)
 local titanicOffsets  = {}
-local TitanicAnchored = false     -- when true the ship stops even if Forward held
 
 BtnTitanicDir.MouseButton1Click:Connect(function()
     TitanicDirOn = not TitanicDirOn
@@ -2318,17 +2333,7 @@ BtnTitanicStop.MouseButton1Click:Connect(function()
     end)
 end)
 
--- Hide panel when mode changes
-local oldSwitch = SWITCH_MODE
-SWITCH_MODE = function(name)
-    oldSwitch(name)
-    TitanicPanel.Visible = (name == "Titanic")
-    if name ~= "Titanic" then
-        TitanicDirOn, TitanicFwdOn = false, false
-    end
-end
-
--- Button added to main scrolling frame
+-- Button in main scrolling frame
 local BtnTitanic = BTN("Titanic Ship Orbit", Color3.fromRGB(25,60,130))
 
 BtnTitanic.MouseButton1Click:Connect(function()
@@ -2338,7 +2343,7 @@ BtnTitanic.MouseButton1Click:Connect(function()
 
     -- Compute ship offsets scaled to block count
     titanicOffsets = BuildTitanicOffsets(#CP)
-    TitanicDirOn, TitanicFwdOn = false, false
+    TitanicDirOn, TitanicFwdOn, TitanicAnchored = false, false, false
 
     -- Spawn Titanic in front of the player (not on them)
     local Root = L.Character and L.Character:FindFirstChild("HumanoidRootPart")
@@ -2546,6 +2551,7 @@ SBPanel.BorderSizePixel  = 0
 SBPanel.Active           = true
 SBPanel.Draggable        = true
 SBPanel.Visible          = false
+-- NOTE: SBPanel is user-toggled, not mode-dependent; do NOT add to ModePanels
 Instance.new("UICorner", SBPanel).CornerRadius = UDim.new(0,8)
 local sbSt = Instance.new("UIStroke", SBPanel)
 sbSt.Color, sbSt.Thickness = Color3.fromRGB(0,175,220), 1.3
